@@ -1,0 +1,12 @@
+*~
+deps/
+ebin/
+log/
+_rel/
+*.dump
+erl_crash.dump
+.erlang.mk.packages.v2
+erl_crash.dump
+relx
+config/vm.args
+ttb_last_config
