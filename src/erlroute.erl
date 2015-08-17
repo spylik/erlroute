@@ -42,7 +42,10 @@
         sub/5,
         sub/6,
         unsub/5,
-        unsub/6
+        unsub/6,
+        generate_routing_name/2,
+        generate_routing_name1/1,
+        generate_routing_name2/1
     ]).
 
 %-compile([export_all]).
@@ -271,6 +274,6 @@ unsubscribe(Type, Source, Topic, Dest, DestType) ->
     Source  ::  pid() | atom() | term().
 
 generate_routing_name(Type, Source) when is_atom(Source)->
-    list_to_atom(lists:append(["route_", atom_to_list(Type), "_", atom_to_list(Source)]));
+    list_to_atom("route_" ++ atom_to_list(Type) ++ "_" ++ atom_to_list(Source));
 generate_routing_name(Type, Source) when is_pid(Source)->
-    list_to_atom(lists:append(["route_", atom_to_list(Type), "_", pid_to_list(Source)])).
+    list_to_atom("route_" ++ atom_to_list(Type) ++ "_" ++ pid_to_list(Source)).
