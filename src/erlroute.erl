@@ -43,9 +43,7 @@
         sub/6,
         unsub/5,
         unsub/6,
-        generate_routing_name/2,
-        generate_routing_name1/1,
-        generate_routing_name2/1
+        generate_routing_name/2
     ]).
 
 %-compile([export_all]).
