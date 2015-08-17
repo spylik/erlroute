@@ -9,7 +9,8 @@
 %%
 %% It is not pub/sub queue broker it is pub/sub router without queue-logic overhead.
 %% This module use native erlang queue-logic and pure erlang message passing.
-%% It is much faster than RabbitMQ. 
+%% When we don't need to use full AMQP futures, messages via erlroute going to be much 
+%% cheap and faster than RabbitMQ. 
 %% 
 %% Every publisher by default have 2 dynamic routes - by_module_name and by_pid. 
 %% Subscribes can subscribe for messages from specified module or process id.
