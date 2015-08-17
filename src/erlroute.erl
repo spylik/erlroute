@@ -219,14 +219,13 @@ subscribe(Type, Source, Topic, Dest, DestType) ->
 
 % check if ets routing table is present, on falure - let's create it 
 check_route_table_present(EtsName) ->
-    % todo: we need find most effective way to check table is present
-    % now looks like ets:first works fastest, but need more research 
-    try ets:first(EtsName) 
-    catch 
-        _:_ ->
+    case ets:info(EtsName, size) of
+        undefined ->
             ets:new(EtsName, [bag, protected, {read_concurrency, true}, {keypos, #active_route.topic}, named_table]),
             ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
-            {created, EtsName}
+            {created, EtsName};
+        _ ->
+            ok
     end.
 
 % ================================ end of sub part =================================
