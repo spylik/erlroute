@@ -39,8 +39,10 @@
 -export([
         start_link/0,
         pub/4,
+        sub/4,
         sub/5,
         sub/6,
+        unsub/4,
         unsub/5,
         unsub/6,
         generate_routing_name/2
@@ -186,6 +188,15 @@ send([], _Message) -> ok.
 % While ETS route table not present, we do not waste time for processing dynamic routes
 % @end
 
+% async subscribe to pid (default)
+-spec sub(by_module_name | by_pid, Source, Topic, Dest) -> ok when
+    Source  ::  pid() | atom() | term(),
+    Topic   ::  binary(),
+    Dest    ::  pid() | atom().
+
+sub(Type, Source, Topic, Dest) ->
+    sub(async, Type, Source, Topic, Dest, pid).
+
 % async/sync subscribe to pid
 -spec sub(sync | async, by_module_name | by_pid, Source, Topic, Dest) -> ok when
     Source  ::  pid() | atom() | term(),
@@ -233,6 +244,15 @@ check_route_table_present(EtsName) ->
 % @doc
 % When we going to unsubscribe, we just delete record from ets-table
 % @end
+
+% async unsubscribe from pid (default)
+-spec unsub(by_module_name | by_pid, Source, Topic, Dest) -> ok when
+    Source  ::  pid() | atom() | term(),
+    Topic   ::  binary(),
+    Dest    ::  pid() | atom().
+
+unsub(Type, Source, Topic, Dest) ->
+    unsub(async, Type, Source, Topic, Dest, pid).
 
 % async/sync unsubscribe from pid
 -spec unsub(sync | async, by_module_name | by_pid, Source, Topic, Dest) -> ok when
