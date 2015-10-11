@@ -1,0 +1,44 @@
+= Erlroute
+
+Erlroute is the simple, fast and easy-to-use implementation of "Waveform application" behaviour.
+Erlroute helps to think different when you go to design your applications for realtime concurrent world.
+
+= WTF bro? What does it mean "Waveform application" behaviour?
+
+With erlroute some of your erlang processes can become radio stations - produce and broadcast output signals to own channels. In same time another unknown number of processes can dynamically subscribe/unsubscribe to/from this channels.
+
+Actually erlroute do simple work - it just bring dynamic multiroute future to standard erlang actor model message passing and do it without amq-protocol overhead.
+
+= Why just do not use AMQP broker for this purpose?
+
+Sure, you can also implement this behaviour with any AMQP-broker.
+But when you goin to deal with amqp-brokers you also going to deal with all amq protocol routine - you should open connection from producer, create channel, push message, open connection from subscriber, subscribe, pull message, etc.   Also, after all overheads you going to deal with bad latency.   Erlroute uses native erlang message passing without any overhead, do it very fast and via the simplest and fastest way. 
+
+= When erlroute useful and when not so?
+* Erlroute useful if you are going to design dynamically environment where one group of processes (listeners) in some conditions may require data from other processes (producers).
+* Erlroute useful when you not sure which processes in future should require data from producer.
+* Erlroute useful to avoid construction like:
+[source,erlang]
+----
+multiple_send(Message) ->
+	process1 ! Message,
+	process2 ! Message,
+	process3 ! Message,
+	process4 ! Message,
+	process5 ! Message.
+---
+With erlroute you can write simple: 
+[source,erlang]
+----
+multiple_send(Message) ->
+	erlroute:pub(?MODULE, self(), test_topic, Message);
+----
+
+* Erlroute not useful If you are going to produce data which may required by applications written in other languages. In this case the best way use AMQP-broker.
+
+= Erlroute for Evolutionary Neural Networks.
+Erlroute actually do same job as axon and dendrite. Some neuron generate signal and produce it via axon erlroute:pub/4 and other processes receiving signals via dendrites. Dendites links to axons by erlroute:sub/5,6. 
+With erlroute you can implement different neuron links and dinamically change this links with erlroute:sub/5,6 and erlroute:unsub/5,6.
+
+
+..early draft.... to be continued
