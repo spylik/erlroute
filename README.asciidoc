@@ -40,7 +40,7 @@ And then, subscibers could easy to subscribe:
 
 [source,erlang]
 ----
-erlroute:sub(async, by_module_name, test, <<"test_topic">>, bitstamp_parser, self()).
+erlroute:sub(async, by_module_name, test, <<"test_topic">>, self()).
 ----
 
 * Erlroute not useful If you are going to produce data which may required by applications written in other languages. In this case the best way use AMQP-broker. Erlroute designed only for internal erlang routes.
