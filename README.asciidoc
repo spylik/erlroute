@@ -26,7 +26,7 @@ multiple_send(Message) ->
 	process3 ! Message,
 	process4 ! Message,
 	process5 ! Message.
----
+----
 With erlroute you can write simple: 
 [source,erlang]
 ----
