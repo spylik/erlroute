@@ -46,7 +46,7 @@ erlroute:sub(by_module_name, test, <<"test_topic">>, self()).
 * Erlroute not useful If you are going to produce data which may required by applications written in other languages. In this case the best way use AMQP-broker. Erlroute designed only for internal erlang routes.
 
 == Erlroute for evolutionary Neural Networks.
-Erlroute actually do same job as axons and dendrits. Some neuron generate signal and produce it via axon erlroute:pub/4 and other neurons receiving signals via dendrites. Dendites links to axons by erlroute:sub/5,6. With erlroute easy implement overfitting as well - neuron links can be destroyed by erlroute:unsub/5,6.
+Erlroute actually do same job as axons and dendrits. Some neuron generate signal and produce it via axon erlroute:pub/4 and other neurons receiving signals via dendrites. Dendites links to axons by erlroute:sub/5,6. With erlroute you can try to implement your overfitting strategy as well - neuron links can be destroyed by erlroute:unsub/5,6.
 
 
 ..early draft.... to be continued
