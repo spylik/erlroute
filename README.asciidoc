@@ -1,13 +1,12 @@
 = Erlroute
 
 Erlroute is the simple, fast and easy-to-use implementation of "Waveform application" behaviour.
-Erlroute helps to think different when you go to design your applications for realtime concurrent world.
 
-== WTF bro? What does it mean "Waveform application" behaviour?
+== What does it mean "Waveform application behaviour"?
 
 With erlroute some of your erlang processes can become radio stations - produce and broadcast output signals to own channels. In same time another unknown number of processes can dynamically subscribe/unsubscribe to/from this channels.
 
-Actually erlroute do simple work - it just bring dynamic multiroute future to standard erlang message passing and do it without amq-protocol overhead.
+Actually erlroute do simple work - he just map routine of sending to multiple subscriber.it just bring dynamic multiroute future to standard erlang message passing and do it without amq-protocol overhead.
 
 == Why just do not use AMQP broker for this purpose?
 
