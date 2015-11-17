@@ -53,7 +53,7 @@
 % we will use ?MODULE as servername
 -define(SERVER, ?MODULE).
 
-% --------------------------------- gen_server part --------------------------------------
+% ----------------------------- gen_server part --------------------------------
 
 % star/stop api
 start_link() ->
@@ -85,6 +85,7 @@ handle_call({unsub, Type, Source, Topic, Dest, DestType}, _From, State) ->
 handle_call(Msg, _From, State) ->
     error_logger:warning_msg("we are in undefined handle_call with message ~p\n",[Msg]),
     {reply, ok, State}.
+
 %-----------end of handle_call-------------
 
 
@@ -102,16 +103,18 @@ handle_cast({unsub, Type, Source, Topic, Dest, DestType}, State) ->
 handle_cast(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle_cast with message ~p\n",[Msg]),
     {noreply, State}.
+
 %-----------end of handle_cast-------------
 
 
 %--------------handle_info-----------------
-%% handle_info for all other thigs
+
+% handle_info for all other thigs
 handle_info(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle_info with message ~p\n",[Msg]),
     {noreply, State}.
-%-----------end of handle_info-------------
 
+%-----------end of handle_info-------------
 
 terminate(Reason, State) ->
     {noreply, Reason, State}.
@@ -119,8 +122,9 @@ terminate(Reason, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-% ===================================== end of gen_server part ==================================
-% ----------------------------------------- pub part --------------------------------------------
+% ============================= end of gen_server part =========================
+% ----------------------------------- pub part ---------------------------------
+
 -spec pub(Module, Pid, Topic, Message) -> ok when
     Module  ::  atom(),
     Pid     ::  pid() | atom(),
@@ -131,7 +135,8 @@ code_change(_OldVsn, State, _Extra) ->
 % static hardcoded rules can be here %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% final clause - if we don't mutch before any clueses, we just going to dynamic routing part
+% final clause - if we don't mutch before any clueses, we just 
+% going to dynamic routing part
 pub(Module, Pid, Topic, Message) ->
     dyn_route(Module, Pid, Topic, Message).
 
@@ -143,7 +148,6 @@ dyn_route(Module, Pid, Topic, Message) ->
     
     % and second - by_pid or registered name (atom)
     load_routing_and_send(generate_routing_name(by_pid, Pid), Topic, Message).
-
 
 % load routing recursion 
 load_routing_and_send(EtsName, Topic, Message) ->
@@ -167,6 +171,7 @@ load_routing_and_send(EtsName, Topic, Message) ->
 send([{active_route,_,Pid,pid}|T], Message) ->
     Pid ! Message,
     send(T, Message);
+
 % sending to poolboy pool
 send([{active_route,_,Pool,poolboy_pool}|T], Message) ->
     try poolboy:checkout(Pool) of
@@ -179,13 +184,16 @@ send([{active_route,_,Pool,poolboy_pool}|T], Message) ->
         X:Y -> error_logger:error_msg("Looks like pool ~p not found, got error ~p with reason ~p",[Pool,X,Y])
     end,
     send(T,Message);
+
+% final clause for empty list
 send([], _Message) -> ok.
 
-% ================================ end of pub part =================================
-% ----------------------------------- sub part -------------------------------------
+% ================================ end of pub part =============================
+% ----------------------------------- sub part ---------------------------------
 % @doc
 % We create dynamic rules when going to subscirbe.
-% While ETS route table not present, we do not waste time for processing dynamic routes
+% While ETS route table not present, we do not waste time for processing dynamic 
+% routes.
 % @end
 
 % async subscribe to pid (default)
@@ -212,8 +220,11 @@ sub(async, Type, Source, Topic, Dest) ->
     Topic   ::  binary(),
     Dest    ::  pid() | atom().
 
+% async
 sub(async, Type, Source, Topic, Dest, DestType) ->
     gen_server:cast(?MODULE, {sub, Type, Source, Topic, Dest, DestType});
+
+% sync
 sub(sync, Type, Source, Topic, Dest, DestType) ->
     gen_server:call(?MODULE, {sub, Type, Source, Topic, Dest, DestType}).
 
@@ -239,8 +250,8 @@ check_route_table_present(EtsName) ->
             ok
     end.
 
-% ================================ end of sub part =================================
-% ----------------------------------- unsub part -------------------------------------
+% ================================ end of sub part =============================
+% ----------------------------------- unsub part -------------------------------
 % @doc
 % When we going to unsubscribe, we just delete record from ets-table
 % @end
@@ -269,8 +280,11 @@ unsub(async, Type, Source, Topic, Dest) ->
     Topic   ::  binary(),
     Dest    ::  pid() | atom().
 
+% async
 unsub(async, Type, Source, Topic, Dest, DestType) ->
     gen_server:cast(?MODULE, {unsub, Type, Source, Topic, Dest, DestType});
+
+% sync
 unsub(sync, Type, Source, Topic, Dest, DestType) ->
     gen_server:call(?MODULE, {unsub, Type, Source, Topic, Dest, DestType}).
 
@@ -283,8 +297,10 @@ unsub(sync, Type, Source, Topic, Dest, DestType) ->
 unsubscribe(Type, Source, Topic, Dest, DestType) ->
     EtsName = generate_routing_name(Type, Source),
     ets:match_delete(EtsName, #active_route{topic=Topic, dest=Dest, dest_type=DestType}).
-% ================================ end of unsub part =================================
-% ----------------------------------- other functions --------------------------------
+
+% ================================ end of sub part =============================
+% ---------------------------------other functions -----------------------------
+
 
 % generate routing name which should used for ets table
 -spec generate_routing_name(by_module_name | by_pid, Source) -> ok when
