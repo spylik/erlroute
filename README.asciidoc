@@ -1,17 +1,17 @@
 = Erlroute
 
-Erlroute is the simple, fast and easy-to-use implementation of "Waveform application" behaviour.
+Erlroute is the simple, fast and easy-to-use implementation of "software defined radio" behaviour.
 
-== What does it mean "Waveform application behaviour"?
+== What does it mean "Software defined radio" behaviour?
 
 With erlroute some of your erlang processes can become radio stations - produce and broadcast output signals to own channels. In same time another unknown number of processes can dynamically subscribe/unsubscribe to/from this channels.
 
-Actually erlroute do simple work - he just map routine of sending to multiple subscriber.it just bring dynamic multiroute future to standard erlang message passing and do it without amq-protocol overhead.
+Actually erlroute do simple work - he just map routine of sending messages to multiple subscriber. It just bring dynamic message multiroute future to standard erlang actor model and do it without amq-protocol overhead.
 
 == Why just do not use AMQP broker for this purpose?
 
 Sure, you can also implement this behaviour with any AMQP-broker.
-But when you goin to deal with amqp-brokers you also going to deal with all amq protocol routine - you should open connection from producer, create channel, push message, open connection from subscriber, subscribe, pull message, etc.   Also, after all overheads you going to deal with bad latency.   Erlroute uses native erlang message passing without any overhead, do it very fast and via the simplest and fastest way. 
+But when you goin to deal with amqp-brokers you also going to deal with all amq protocol routine - you should open connection from producer, create channel, push message, open connection from subscriber, subscribe, pull message, etc. Also, after all overheads you going to deal with bad latency. Erlroute uses native erlang message passing without any overhead, do it very fast and via the simplest and fastest way. 
 
 == When erlroute useful and when not so?
 * Erlroute useful if you are going to design dynamically environment where one group of processes (listeners) in some cases may require data from other processes (producers) and in some another cases - do not.
@@ -42,7 +42,7 @@ And then, subscibers could easy to subscribe:
 erlroute:sub(by_module_name, test, <<"test_topic">>, self()).
 ----
 
-* Erlroute not useful If you are going to produce data which may required by applications written in other languages. In this case the best way use AMQP-broker. Erlroute designed only for internal erlang routes.
+* Erlroute not useful if you are going to produce data which may required by applications written in other languages. In this case the best way use AMQP-broker. Erlroute designed only for internal erlang routes.
 
 == Erlroute for evolutionary Neural Networks.
 Erlroute actually do same job as axons and dendrits. Some neuron generate signal and produce it via axon erlroute:pub/4 and other neurons receiving signals via dendrites. Dendites links to axons by erlroute:sub/5,6. With erlroute you can try to implement your overfitting strategy as well - neuron links can be destroyed by erlroute:unsub/5,6.
