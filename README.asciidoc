@@ -1,5 +1,7 @@
 = Erlroute
 
+[![Build Status](https://api.travis-ci.org/spylik/erlroute.svg?branch=master)](https://travis-ci.org/spylik/erlroute)
+
 Erlroute is the simple, fast and easy-to-use implementation of "software defined radio" behaviour.
 
 == What does it mean "Software defined radio" behaviour?
