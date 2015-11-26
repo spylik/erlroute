@@ -38,6 +38,7 @@
 % public api 
 -export([
         start_link/0,
+        stop/0,
         pub/4,
         sub/4,
         sub/5,
@@ -58,6 +59,9 @@
 % star/stop api
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+stop() ->
+    gen_server:call(?SERVER, stop).
 
 % we going to create ETS tables for dynamic routing rules in init section
 init([]) ->
@@ -80,6 +84,9 @@ handle_call({sub, Type, Source, Topic, Dest, DestType}, _From, State) ->
 handle_call({unsub, Type, Source, Topic, Dest, DestType}, _From, State) ->
     Result = unsubscribe(Type, Source, Topic, Dest, DestType),
     {reply, Result, State};
+
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State};
 
 % handle_call for all other thigs
 handle_call(Msg, _From, State) ->
