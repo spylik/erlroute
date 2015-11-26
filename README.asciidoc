@@ -1,5 +1,4 @@
 image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build Status", link="https://travis-ci.org/spylik/erlroute"]
-
 = Erlroute
 
 Erlroute is the simple, fast and easy-to-use implementation of "software defined radio" behaviour.
