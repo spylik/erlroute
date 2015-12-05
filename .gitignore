@@ -14,3 +14,4 @@ ttb_last_config
 .rebar
 .DS_Store
 .dialyzer_plt
+erlroute.d
