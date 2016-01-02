@@ -10,3 +10,6 @@ otp_release:
   - R16B01
   - R16B
 sudo: false
+branches:
+    except:
+        -develop
