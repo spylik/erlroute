@@ -12,4 +12,4 @@ otp_release:
 sudo: false
 branches:
     except:
-        -develop
+        - develop
