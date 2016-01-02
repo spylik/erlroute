@@ -21,6 +21,8 @@
 %% Functions from this process can be called directly via gen_server:call 
 %% or gen_server:cast functions. Of course direct functions works a little bit faster, but 
 %% we also can use message passing when need this future.
+%%
+%% More documentation and examples at https://github.com/spylik/erlroute
 %% @end
 %% --------------------------------------------------------------------------------
 
