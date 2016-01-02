@@ -113,6 +113,7 @@ generate_routing_name_must_generate_correct_ets_table_name_by_pid() ->
       ).
 
 after_subscribe_we_should_have_ets_entry() ->
+
     Type = by_module_name,
     Source = test_producer,
     Topic = <<"*">>,
@@ -130,5 +131,5 @@ after_subscribe_we_should_have_ets_entry() ->
 % ========================= end of tests functions ============================
 
 
-start_server() -> io:format("try start"), ?TESTSERVER:start_link().
+start_server() -> ?TESTSERVER:start_link().
 stop_server(_Pid) -> ?TESTSERVER:stop().

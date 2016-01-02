@@ -68,8 +68,7 @@ stop() ->
 % we going to create ETS tables for dynamic routing rules in init section
 -spec init([]) -> {ok, undefined}.
 init([]) ->
-    _ = ets:new(
-        msg_routes, [
+    _ = ets:new(msg_routes, [
             set, 
             protected, 
             {keypos, #msg_routes.ets_name}, 
@@ -243,7 +242,7 @@ sub(async, Type, Source, Topic, Dest, DestType) ->
     io:format("we are in async cast"),
     gen_server:cast(?MODULE, {sub, Type, Source, Topic, Dest, DestType});
 sub(sync, Type, Source, Topic, Dest, DestType) ->
-    io:format("we are in sync call"),
+    io:format("we are in async call"),
     gen_server:call(?MODULE, {sub, Type, Source, Topic, Dest, DestType}).
 
 %----- end of public api: sub section ----
@@ -257,8 +256,7 @@ sub(sync, Type, Source, Topic, Dest, DestType) ->
 subscribe(Type, Source, Topic, Dest, DestType) ->
     io:format("we are in subscribe"),
     EtsName = generate_routing_name(Type, Source),
-    check_route_table_present(EtsName),
-    io:format("we are here"),
+    _ = check_route_table_present(EtsName),
     ets:insert(EtsName, #active_route{topic=Topic, dest=Dest, dest_type=DestType}).
 
 
@@ -332,10 +330,15 @@ generate_routing_name(Type, Source) when is_pid(Source)->
 check_route_table_present(EtsName) ->
     case ets:info(EtsName, size) of
         undefined ->
-            ets:new(EtsName, [bag, protected, {read_concurrency, true}, {keypos, #active_route.topic}, named_table]),
-            ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
+            _ = ets:new(EtsName, [
+                    bag, 
+                    protected, 
+                    {read_concurrency, true}, 
+                    {keypos, #active_route.topic}, 
+                    named_table
+                ]),
+            _ = ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
             {created, EtsName};
         _ ->
             ok
     end.
-
