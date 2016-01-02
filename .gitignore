@@ -16,3 +16,4 @@ ttb_last_config
 .dialyzer_plt
 erlroute.d
 *.beam
+*.plt
