@@ -27,6 +27,10 @@
 %% --------------------------------------------------------------------------------
 
 -module(erlroute).
+-define(NOTEST, true).
+-ifdef(TEST).
+    -compile(export_all).
+-endif.
 
 -include("erlroute.hrl").
 
@@ -47,11 +51,8 @@
         sub/6,
         unsub/4,
         unsub/5,
-        unsub/6,
-        generate_routing_name/2
+        unsub/6
     ]).
-
-%-compile([export_all]).
 
 % we will use ?MODULE as servername
 -define(SERVER, ?MODULE).
@@ -239,10 +240,8 @@ sub(sync, Type, Source, Topic, Dest) ->
     Dest    ::  pid() | atom().
 
 sub(async, Type, Source, Topic, Dest, DestType) ->
-    io:format("we are in async cast"),
     gen_server:cast(?MODULE, {sub, Type, Source, Topic, Dest, DestType});
 sub(sync, Type, Source, Topic, Dest, DestType) ->
-    io:format("we are in async call"),
     gen_server:call(?MODULE, {sub, Type, Source, Topic, Dest, DestType}).
 
 %----- end of public api: sub section ----
@@ -254,9 +253,8 @@ sub(sync, Type, Source, Topic, Dest, DestType) ->
     Dest    ::  pid() | atom().
 
 subscribe(Type, Source, Topic, Dest, DestType) ->
-    io:format("we are in subscribe"),
     EtsName = generate_routing_name(Type, Source),
-    _ = check_route_table_present(EtsName),
+    _ = route_table_must_present(EtsName),
     ets:insert(EtsName, #active_route{topic=Topic, dest=Dest, dest_type=DestType}).
 
 
@@ -324,21 +322,21 @@ generate_routing_name(Type, Source) when is_pid(Source)->
 
 
 % check if ets routing table is present, on falure - let's create it 
--spec check_route_table_present (EtsName) -> ok | {created,ok} when
+-spec route_table_must_present (EtsName) -> ok | {created,ok} when
       EtsName   ::  atom().
 
-check_route_table_present(EtsName) ->
-    case ets:info(EtsName, size) of
-        undefined ->
-            _ = ets:new(EtsName, [
-                    bag, 
-                    protected, 
-                    {read_concurrency, true}, 
-                    {keypos, #active_route.topic}, 
-                    named_table
-                ]),
-            _ = ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
-            {created, EtsName};
-        _ ->
-            ok
-    end.
+route_table_must_present(EtsName) ->
+   case ets:info(EtsName, size) of
+       undefined ->
+           _ = ets:new(EtsName, [
+                   bag, 
+                   protected, 
+                   {read_concurrency, true}, 
+                   {keypos, #active_route.topic}, 
+                   named_table
+               ]),
+           _ = ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
+           {created, EtsName};
+       _ ->
+           ok
+   end.

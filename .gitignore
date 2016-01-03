@@ -17,3 +17,6 @@ ttb_last_config
 erlroute.d
 *.beam
 *.plt
+cover/*
+eunit.coverdata
+ct.cover.spec
