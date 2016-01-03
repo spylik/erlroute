@@ -280,7 +280,10 @@ unsub(Type, Source, Topic, Dest) ->
     Dest    ::  pid() | atom().
 
 unsub(async, Type, Source, Topic, Dest) ->
-    unsub(async, Type, Source, Topic, Dest, pid).
+    unsub(async, Type, Source, Topic, Dest, pid);
+
+unsub(sync, Type, Source, Topic, Dest) ->
+    unsub(sync, Type, Source, Topic, Dest, pid).
 
 % async/sync unsubscribe (from pid or poolboy_pool)
 -spec unsub(sync | async, by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> ok when
