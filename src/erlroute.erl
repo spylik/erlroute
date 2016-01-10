@@ -44,14 +44,10 @@
 % public api 
 -export([
         start_link/0,
-        stop/0,
+        stop/0, stop/1,
         pub/4,
-        sub/4,
-        sub/5,
-        sub/6,
-        unsub/4,
-        unsub/5,
-        unsub/6
+        sub/4, sub/5, sub/6,
+        unsub/4, unsub/5, unsub/6
     ]).
 
 % we will use ?MODULE as servername
@@ -64,7 +60,11 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 stop() ->
-    gen_server:call(?SERVER, stop).
+    stop(sync).
+stop(sync) ->
+    gen_server:call(?SERVER, stop);
+stop(async) ->
+    gen_server:cast(?SERVER, stop).
 
 % we going to create ETS tables for dynamic routing rules in init section
 -spec init([]) -> {ok, undefined}.
@@ -88,8 +88,9 @@ handle_call({unsub, Type, Source, Topic, Dest, DestType}, _From, State) ->
     Result = unsubscribe(Type, Source, Topic, Dest, DestType),
     {reply, Result, State};
 
+% handle_cast for stop
 handle_call(stop, _From, State) ->
-    {stop, normal, ok, State};
+    {stop, normal, State};
 
 % handle_call for all other thigs
 handle_call(Msg, _From, State) ->
@@ -108,6 +109,10 @@ handle_cast({sub, Type, Source, Topic, Dest, DestType}, State) ->
 handle_cast({unsub, Type, Source, Topic, Dest, DestType}, State) ->
     unsubscribe(Type, Source, Topic, Dest, DestType),
     {noreply, State};
+
+% handle_cast for stop
+handle_cast(stop, State) ->
+    {stop, normal, State};
 
 % handle_cast for all other thigs
 handle_cast(Msg, State) ->
