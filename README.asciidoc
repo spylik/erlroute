@@ -1,4 +1,4 @@
-image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build Status", link="https://travis-ci.org/spylik/erlroute"]
+image:https://api.travis-ci.org/spylik/erlroute.svg?branch=develop[title="Build Status", link="https://travis-ci.org/spylik/erlroute"]
 
 = Erlroute
 
