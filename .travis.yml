@@ -1,7 +1,7 @@
 language: erlang
 script: 
-  - bundle exec make tests
-  - bundle exec make
+  - make tests
+  - make
 otp_release:
   - 17.4
   - 17.3
