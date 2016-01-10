@@ -1,4 +1,7 @@
 language: erlang
+script: 
+  - bundle exec make tests
+  - bundle exec make
 otp_release:
   - 17.4
   - 17.3
@@ -10,6 +13,3 @@ otp_release:
   - R16B01
   - R16B
 sudo: false
-branches:
-    except:
-        - develop
