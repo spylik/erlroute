@@ -1,7 +1,4 @@
 language: erlang
-script: 
-  - make tests
-  - make
 otp_release:
   - 17.4
   - 17.3

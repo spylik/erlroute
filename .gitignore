@@ -15,8 +15,3 @@ ttb_last_config
 .DS_Store
 .dialyzer_plt
 erlroute.d
-*.beam
-*.plt
-cover/*
-eunit.coverdata
-ct.cover.spec
