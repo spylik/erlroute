@@ -21,10 +21,16 @@
 %% Functions from this process can be called directly via gen_server:call 
 %% or gen_server:cast functions. Of course direct functions works a little bit faster, but 
 %% we also can use message passing when need this future.
+%%
+%% More documentation and examples at https://github.com/spylik/erlroute
 %% @end
 %% --------------------------------------------------------------------------------
 
 -module(erlroute).
+-define(NOTEST, true).
+-ifdef(TEST).
+    -compile(export_all).
+-endif.
 
 -include("erlroute.hrl").
 
@@ -38,18 +44,11 @@
 % public api 
 -export([
         start_link/0,
-        stop/0,
+        stop/0, stop/1,
         pub/4,
-        sub/4,
-        sub/5,
-        sub/6,
-        unsub/4,
-        unsub/5,
-        unsub/6,
-        generate_routing_name/2
+        sub/4, sub/5, sub/6,
+        unsub/4, unsub/5, unsub/6
     ]).
-
-%-compile([export_all]).
 
 % we will use ?MODULE as servername
 -define(SERVER, ?MODULE).
@@ -61,12 +60,16 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 stop() ->
-    gen_server:call(?SERVER, stop).
+    stop(sync).
+stop(sync) ->
+    gen_server:call(?SERVER, stop);
+stop(async) ->
+    gen_server:cast(?SERVER, stop).
 
 % we going to create ETS tables for dynamic routing rules in init section
+-spec init([]) -> {ok, undefined}.
 init([]) ->
-    ets:new(
-        msg_routes, [
+    _ = ets:new(msg_routes, [
             set, 
             protected, 
             {keypos, #msg_routes.ets_name}, 
@@ -75,7 +78,7 @@ init([]) ->
         ]),
     {ok, undefined}.
 
-%--------------handle_call----------------
+%--------------handle_call-----------------
 
 handle_call({sub, Type, Source, Topic, Dest, DestType}, _From, State) ->
     Result = subscribe(Type, Source, Topic, Dest, DestType),
@@ -85,8 +88,9 @@ handle_call({unsub, Type, Source, Topic, Dest, DestType}, _From, State) ->
     Result = unsubscribe(Type, Source, Topic, Dest, DestType),
     {reply, Result, State};
 
+% handle_cast for stop
 handle_call(stop, _From, State) ->
-    {stop, normal, ok, State};
+    {stop, normal, State};
 
 % handle_call for all other thigs
 handle_call(Msg, _From, State) ->
@@ -105,6 +109,10 @@ handle_cast({sub, Type, Source, Topic, Dest, DestType}, State) ->
 handle_cast({unsub, Type, Source, Topic, Dest, DestType}, State) ->
     unsubscribe(Type, Source, Topic, Dest, DestType),
     {noreply, State};
+
+% handle_cast for stop
+handle_cast(stop, State) ->
+    {stop, normal, State};
 
 % handle_cast for all other thigs
 handle_cast(Msg, State) ->
@@ -138,9 +146,9 @@ code_change(_OldVsn, State, _Extra) ->
     Topic   ::  binary(),
     Message ::  term().
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% static hardcoded rules can be here %
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%------------------------------------------%
+%    static hardcoded rules can be here    %
+%------------------------------------------%
 
 % final clause - if we don't mutch before any clueses, we just 
 % going to dynamic routing part
@@ -203,6 +211,9 @@ send([], _Message) -> ok.
 % routes.
 % @end
 
+%------- public api: sub section ----------
+
+% sub / 4
 % async subscribe to pid (default)
 -spec sub(by_module_name | by_pid, Source, Topic, Dest) -> ok when
     Source  ::  pid() | atom() | term(),
@@ -212,6 +223,8 @@ send([], _Message) -> ok.
 sub(Type, Source, Topic, Dest) ->
     sub(async, Type, Source, Topic, Dest, pid).
 
+
+% sub / 5
 % async/sync subscribe to pid
 -spec sub(sync | async, by_module_name | by_pid, Source, Topic, Dest) -> ok when
     Source  ::  pid() | atom() | term(),
@@ -219,43 +232,36 @@ sub(Type, Source, Topic, Dest) ->
     Dest    ::  pid() | atom().
 
 sub(async, Type, Source, Topic, Dest) ->
-    sub(async, Type, Source, Topic, Dest, pid).
+    sub(async, Type, Source, Topic, Dest, pid);
+sub(sync, Type, Source, Topic, Dest) ->
+    sub(sync, Type, Source, Topic, Dest, pid).
 
+
+% sub / 6
 % async/sync subscribe (to pid or poolboy_pool)
 -spec sub(sync | async, by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> ok when
     Source  ::  pid() | atom() | term(),
     Topic   ::  binary(),
     Dest    ::  pid() | atom().
 
-% async
 sub(async, Type, Source, Topic, Dest, DestType) ->
     gen_server:cast(?MODULE, {sub, Type, Source, Topic, Dest, DestType});
-
-% sync
 sub(sync, Type, Source, Topic, Dest, DestType) ->
     gen_server:call(?MODULE, {sub, Type, Source, Topic, Dest, DestType}).
 
+%----- end of public api: sub section ----
+
 % subscribe routine (called from gen_server call/cast)
--spec subscribe(by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> ok when
+-spec subscribe(by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> true when
     Source  ::  pid() | atom() | term(),
     Topic   ::  binary(),
     Dest    ::  pid() | atom().
 
 subscribe(Type, Source, Topic, Dest, DestType) ->
     EtsName = generate_routing_name(Type, Source),
-    check_route_table_present(EtsName),
-    ets:insert(EtsName, #active_route{topic=Topic,dest=Dest,dest_type=DestType}).
+    _ = route_table_must_present(EtsName),
+    ets:insert(EtsName, #active_route{topic=Topic, dest=Dest, dest_type=DestType}).
 
-% check if ets routing table is present, on falure - let's create it 
-check_route_table_present(EtsName) ->
-    case ets:info(EtsName, size) of
-        undefined ->
-            ets:new(EtsName, [bag, protected, {read_concurrency, true}, {keypos, #active_route.topic}, named_table]),
-            ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
-            {created, EtsName};
-        _ ->
-            ok
-    end.
 
 % ================================ end of sub part =============================
 % ----------------------------------- unsub part -------------------------------
@@ -279,7 +285,10 @@ unsub(Type, Source, Topic, Dest) ->
     Dest    ::  pid() | atom().
 
 unsub(async, Type, Source, Topic, Dest) ->
-    unsub(async, Type, Source, Topic, Dest, pid).
+    unsub(async, Type, Source, Topic, Dest, pid);
+
+unsub(sync, Type, Source, Topic, Dest) ->
+    unsub(sync, Type, Source, Topic, Dest, pid).
 
 % async/sync unsubscribe (from pid or poolboy_pool)
 -spec unsub(sync | async, by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> ok when
@@ -296,10 +305,11 @@ unsub(sync, Type, Source, Topic, Dest, DestType) ->
     gen_server:call(?MODULE, {unsub, Type, Source, Topic, Dest, DestType}).
 
 % unsubscribe routine (called from gen_server call/cast)
--spec unsubscribe(by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> ok when
+-spec unsubscribe(by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> true when
     Source  ::  pid() | atom() | term(),
     Topic   ::  binary(),
     Dest    ::  pid() | atom().
+
 
 unsubscribe(Type, Source, Topic, Dest, DestType) ->
     EtsName = generate_routing_name(Type, Source),
@@ -317,3 +327,24 @@ generate_routing_name(Type, Source) when is_atom(Source)->
     list_to_atom("route_" ++ atom_to_list(Type) ++ "_" ++ atom_to_list(Source));
 generate_routing_name(Type, Source) when is_pid(Source)->
     list_to_atom("route_" ++ atom_to_list(Type) ++ "_" ++ pid_to_list(Source)).
+
+
+% check if ets routing table is present, on falure - let's create it 
+-spec route_table_must_present (EtsName) -> ok | {created,ok} when
+      EtsName   ::  atom().
+
+route_table_must_present(EtsName) ->
+   case ets:info(EtsName, size) of
+       undefined ->
+           _ = ets:new(EtsName, [
+                   bag, 
+                   protected, 
+                   {read_concurrency, true}, 
+                   {keypos, #active_route.topic}, 
+                   named_table
+               ]),
+           _ = ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
+           {created, EtsName};
+       _ ->
+           ok
+   end.
