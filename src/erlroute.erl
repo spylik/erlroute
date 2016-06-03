@@ -88,7 +88,7 @@ handle_call({unsub, Type, Source, Topic, Dest, DestType}, _From, State) ->
     Result = unsubscribe(Type, Source, Topic, Dest, DestType),
     {reply, Result, State};
 
-% handle_cast for stop
+% handle_call for stop
 handle_call(stop, _From, State) ->
     {stop, normal, State};
 
