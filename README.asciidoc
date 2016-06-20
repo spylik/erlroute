@@ -2,13 +2,9 @@ image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build S
 
 = Erlroute
 
-Erlroute is the simple, fast and easy-to-use implementation of "software defined radio" behaviour.
+Erlroute is the simple, message router.
 
-== What does it mean "Software defined radio" behaviour?
-
-With erlroute some of your erlang processes can become radio stations - produce and broadcast output signals to own channels. In same time another unknown number of processes can dynamically subscribe/unsubscribe to/from this channels.
-
-Actually erlroute do simple work - he just map routine of sending messages to multiple subscriber. It just bring dynamic message multiroute future to standard erlang actor model and do it without amq-protocol overhead.
+Erlroute do simple work - he just map routine of sending messages to multiple subscriber. It just bring dynamic message multiroute future to standard erlang actor model and do it without amq-protocol overhead.
 
 == Why just do not use AMQP broker for this purpose?
 
