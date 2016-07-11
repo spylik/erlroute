@@ -2,48 +2,61 @@ image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build S
 
 = Erlroute
 
-Erlroute is the simple, message router.
+Erlroute is the simple message router designed for link:http://www.jpaulmorrison.com/fbp/index.shtml [Flow Based Programming paradigm].
 
-Erlroute do simple work - he just map routine of sending messages to multiple subscriber. It just bring dynamic message multiroute future to standard erlang actor model and do it without amq-protocol overhead.
+The main idea is to use erlroute:pub everywhere, where you may require the data now or in the future. 
+
+Actually, erlroute do simple job - it just send messages to an unknown number of subscribers.
 
 == Why just do not use AMQP broker for this purpose?
 
-Sure, you can also implement this behaviour with any AMQP-broker.
-But when you goin to deal with amqp-brokers you also going to deal with all amq protocol routine - you should open connection from producer, create channel, push message, open connection from subscriber, subscribe, pull message, etc. Also, after all overheads you going to deal with bad latency. Erlroute uses native erlang message passing without any overhead, do it very fast and via the simplest and fastest way. 
+Sure, FBP paradigm also could be implemented with AMQP-broker.
+But with amqp-broker, you also going to deal with all amq protocol routine - open connection from producer, create channel, push message, open connection from subscriber, subscribe, pull message, etc. After all of this overheads you could have bad performance.
 
-== When erlroute useful and when not so?
+Erlroute simple, fast and designed only for manage message routes inside your Erlang applications.
+
+== When erlroute useful for you and when not so?
 * Erlroute useful if you are going to design dynamically environment where one group of processes (listeners) in some cases may require data from other processes (producers) and in some another cases - do not.
-* Erlroute useful when you not sure which processes in future should require data from producer.
+* Erlroute useful during development - you don't need anymore to think in advance about you may require the data from this line of code somwhere in future or not.
 * Erlroute useful to avoid construction like:
 
 [source,erlang]
 ----
-multiple_send(Message) ->
-	process1 ! Message,
-	process2 ! Message,
-	process3 ! Message,
-	process4 ! Message,
-	process5 ! Message,
-	process6 ! Message.
+SomeData = {time, erlang:system_time()},
+process1 ! SomeData,
+process2 ! SomeData,
+process3 ! SomeData,
+process4 ! SomeData,
+process5 ! SomeData,
+process6 ! SomeData.
 ----
-With erlroute you can write simple: 
+With erlroute you can write just: 
 [source,erlang]
 ----
 % ?MODULE - test
-multiple_send(Message) ->
-	erlroute:pub(?MODULE, self(), <<"test_topic"">, Message).
+erlroute:pub(<<"some_test_topic">>, {time, erlang:system_time()}).
 ----
 And then, subscibers could easy to subscribe:
 
 [source,erlang]
 ----
-erlroute:sub(by_module_name, test, <<"test_topic">>, self()).
+erlroute:sub(<<"some_test_topic">>).
 ----
 
-* Erlroute not useful if you are going to produce data which may required by applications written in other languages. In this case the best way use AMQP-broker. Erlroute designed only for internal erlang routes.
+* Erlroute not useful if you are going to produce data which may required by applications written in other languages. In this case the best way is to use AMQP-broker. Erlroute designed only for internal erlang routes.
 
-== Erlroute for evolutionary Neural Networks.
-Erlroute actually do same job as axons and dendrits. Some neuron generate signal and produce it via axon erlroute:pub/4 and other neurons receiving signals via dendrites. Dendites links to axons by erlroute:sub/5,6. With erlroute you can try to implement your overfitting strategy as well - neuron links can be destroyed by erlroute:unsub/5,6.
+== Erlroute for evolutionary Neural Networks and Genetic Algorithm.
+Erlroute actually do same job as axons and dendrits. Some neuron generate and produce signals and other neurons receiving signals via dendrites. In erlroute axon output is erlroute:pub and dendites could be linked to axons by erlroute:sub. With erlroute able to implement neuron evolution as well - you can obtain full list of availiable producers and topics and randomly create new links with erlroute:sub and destroy it with erlroute:unsub during your software evolution.
 
+== Key feutures
 
-..early draft.... to be continued
+* erlroute:pub/2
+* erlroute:sub_by_topic
+* erlroute:sub_by_process
+* erlroute:sub_by_module
+* erlroute:get_subscribers_by_topic/1
+* erlroute:get_subscribers_by_module/1
+* erlroute:get_subscribers_by_process/1
+* erlroute:get_producers_by_topic
+* erlroute:get_topics_from_module
+* erlroute:get_topics_from_pid
