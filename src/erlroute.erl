@@ -45,7 +45,7 @@
 -export([
         start_link/0,
         stop/0, stop/1,
-        pub/4,
+        pub/5,
         sub/4, sub/5, sub/6,
         unsub/4, unsub/5, unsub/6
     ]).
@@ -140,9 +140,10 @@ code_change(_OldVsn, State, _Extra) ->
 % ============================= end of gen_server part =========================
 % ----------------------------------- pub part ---------------------------------
 
--spec pub(Module, Pid, Topic, Message) -> ok when
+-spec pub(Module, Pid, Line, Topic, Message) -> ok when
     Module  ::  atom(),
     Pid     ::  pid() | atom(),
+    Line    ::  pos_integer(),
     Topic   ::  binary(),
     Message ::  term().
 
@@ -152,7 +153,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 % final clause - if we don't mutch before any clueses, we just 
 % going to dynamic routing part
-pub(Module, Pid, Topic, Message) ->
+pub(Module, Pid, _Line, Topic, Message) ->
     dyn_route(Module, Pid, Topic, Message).
 
 % dynamic ETS-routes 
