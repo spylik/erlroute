@@ -2,18 +2,18 @@ image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build S
 
 = Erlroute
 
-Erlroute is the simple message router designed for link:http://www.jpaulmorrison.com/fbp/index.shtml [Flow Based Programming paradigm].
+Erlroute is the simple message router designed for http://www.jpaulmorrison.com/fbp/index.shtml[Flow Based Programming paradigm^].
 
-The main idea is to use erlroute:pub everywhere, where you may require the data now or in the future. 
+The main idea is to use `erlroute:pub` everywhere, where you may require the data now or in the future. 
 
-Actually, erlroute do simple job - it just send messages to an unknown number of subscribers.
+Actually, erlroute do simple job - it just send messages to... and "where" you can define later.
 
 == Why just do not use AMQP broker for this purpose?
 
-Sure, FBP paradigm also could be implemented with AMQP-broker.
+Sure, this behaviour also could be implemented with AMQP-broker.
 But with amqp-broker, you also going to deal with all amq protocol routine - open connection from producer, create channel, push message, open connection from subscriber, subscribe, pull message, etc. After all of this overheads you could have bad performance.
 
-Erlroute simple, fast and designed only for manage message routes inside your Erlang applications.
+Erlroute simple, fast and designed only for manage message routes inside your Erlang applications between Erlang processes.
 
 == When erlroute useful for you and when not so?
 * Erlroute useful if you are going to design dynamically environment where one group of processes (listeners) in some cases may require data from other processes (producers) and in some another cases - do not.
@@ -40,23 +40,155 @@ And then, subscibers could easy to subscribe:
 
 [source,erlang]
 ----
-erlroute:sub(<<"some_test_topic">>).
+erlroute:sub({topic, <<"some_test_topic">>}).
 ----
 
 * Erlroute not useful if you are going to produce data which may required by applications written in other languages. In this case the best way is to use AMQP-broker. Erlroute designed only for internal erlang routes.
 
-== Erlroute for evolutionary Neural Networks and Genetic Algorithm.
-Erlroute actually do same job as axons and dendrits. Some neuron generate and produce signals and other neurons receiving signals via dendrites. In erlroute axon output is erlroute:pub and dendites could be linked to axons by erlroute:sub. With erlroute able to implement neuron evolution as well - you can obtain full list of availiable producers and topics and randomly create new links with erlroute:sub and destroy it with erlroute:unsub during your software evolution.
+== Erlroute for evolutionary neural networks and genetic algorithms.
+Erlroute actually do same job as axons and dendrits. Some neuron generate and produce signals via axons and other neurons receiving signals via dendrites. In erlroute axon output is `erlroute:pub` and dendites could be linked to axons by `erlroute:sub`. With erlroute you able to implement neuron evolution as well - you can obtain full list of availiable producers and topics and randomly create new links with `erlroute:sub` and randomly destroy existing with `erlroute:unsub` during your software evolution.
 
-== Key feutures
+== Key feutures:
 
-* erlroute:pub/2
-* erlroute:sub_by_topic
-* erlroute:sub_by_process
-* erlroute:sub_by_module
-* erlroute:get_subscribers_by_topic/1
-* erlroute:get_subscribers_by_module/1
-* erlroute:get_subscribers_by_process/1
-* erlroute:get_producers_by_topic
-* erlroute:get_topics_from_module
-* erlroute:get_topics_from_pid
+* native Erlang message passing;
+* flexible routes by module names, processes and topics;
+* support pools as destinations.
+
+== Interface
+
+Erlroute support some useful shortcuts.
+To use shourtcuts `+{parse_transform, erlroute_transform}` must be added as compile options.
+Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlroute/blob/master/include/erlroute.hrl[erlroute.hrl^] instead of parse_transform.
+
+=== Publish
+
+[source,erlang]
+----
+% @doc Shortcut to `erlroute:pub(?MODULE, self(), ?LINE, Topic, Message)` with auto-generated topic.
+% Topic generating by concating ?MODULE and ?LINE and converting to binary. 
+
+-spec erlroute:pub(Message) -> ok 
+    when
+        Message :: term().
+----
+
+[source,erlang]
+----
+% @doc Shortcut to `erlroute:pub(?MODULE, self(), ?LINE, Topic, Message)`.
+
+-spec erlroute:pub(Topic, Message) -> ok
+    when
+        Topic   :: binary(),
+        Message ::` term().
+----
+
+
+[source,erlang]
+----
+% @doc Publish message Message to topic Topic from line Line of module Module with registered name Pid or pid Pid.
+
+-spec erlroute:pub(Module, Pid, Line, Topic, Message) -> ok
+    when
+        Module  :: atom(),
+        Pid     :: pid() | atom(),
+        Line    :: pos_integer(),
+        Topic   :: binary(),
+        Message :: term().
+----    
+
+=== Subscription
+
+[source,erlang]
+----
+% @doc Shortcut to `erlroute:sub(Source, {pid, self()})`.
+
+-spec erlroute:sub(Source) -> ok
+    when
+        Source  ::  [{module, Module} | {process, Proc} | {topic, Topic} | {poolboy, boolean()}],
+        Module  ::  atom(),
+        Proc    ::  pid() | atom(),
+        Topic   ::  binary().
+----
+
+[source,erlang]
+----
+% @doc Subscribe to the message flow. 
+% Erlroute support subscription to pid, to registered process name or to the message pool like https://github.com/devinus/poolboy[Poolboy^].
+% For the process subscribed by pid or registered name it just send message. 
+% For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
+
+-spec erlroute:sub(Source,Dest) -> ok
+    when
+        Source  ::  [{module, Module} | {process, Proc} | {topic, Topic} | {poolboy, boolean()}],
+        Module  ::  atom(),
+        Proc    ::  pid() | atom(),
+        Topic   ::  binary(),
+        Dest    ::  {pid, Proc} | {registered, atom()} | {poolboy, atom()}.
+----
+
+Examples of usage:
+[source,erlang]
+----
+% Subscribe process with pid <0.39.0> to
+% all messages produced by module testmodule. Any topic, any processID.
+
+erlroute:sub([{module, testmodule}], {pid, <0.39.0>});
+----
+
+[source,erlang]
+----
+% Subscribe poolboy pool with name `poolname` to
+% all messages produced by process registered as `testregisteredprocess`. Any topic, any module.
+
+erlroute:sub([{process, testregisteredprocess}], {poolboy, poolname});
+----
+
+[source,erlang]
+----
+% Subscribe process with registered name `testprocess` to 
+% all messages produced by process with pid `<0.38.0>`. Any topic, any module.
+
+erlroute:sub([{process, <0.38.0>}, {registered, testprocess}]);
+----
+
+[source,erlang]
+----
+% Subscribe current process to 
+% all messages with topic \<<"testtopic">>. Any module, any processID.
+
+erlroute:sub([{topic, <<"testtopic">>}]);
+----
+
+[source,erlang]
+----
+% Subscribe current process to 
+% all messages with topic \<<"testtopic">> produced by module `testmodule`. Any processID.
+
+erlroute:sub([{module, testmodule}, {topic, <<"testtopic">>}]);
+----
+
+[source,erlang]
+----
+% Subscribe poolboy pool with name `pool1` to 
+% all messages with topic \<<"testtopic">> produced by module `testmodule`.
+
+erlroute:sub([{module, testmodule}, {topic, <<"testtopic">>}], {poolboy, pool1});
+----
+
+=== Misc
+
+[source,erlang]
+----
+% @doc Get producers
+
+erlroute:get_producers(Prop) -> Result.
+----
+
+[source,erlang]
+----
+% @doc Get subscribers
+
+erlroute:get_subscribers(Prop) -> Result.
+----
+
+
