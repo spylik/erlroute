@@ -1,11 +1,12 @@
 -module(erlroute_tests).
 
+-compile({parse_transform, erlroute_transform}).
+
 -include_lib("eunit/include/eunit.hrl").
 -include("erlroute.hrl").
 
 -define(TESTSERVER, erlroute).
 
--compile({parse_transform, erlroute_transform}).
 
 % --------------------------------- fixtures ----------------------------------
 
@@ -79,7 +80,7 @@ otp_test_() ->
 erlroute_non_started_test_() ->
     {setup,
         fun cleanup/0,
-        fun() -> {inparallel,
+        {inparallel,
             [
                 {<<"When erlroute doesn't start, ets-table msg_routes must be undefined">>, 
                     fun() -> 
@@ -121,13 +122,14 @@ erlroute_non_started_test_() ->
                           )
                     end}
             ]
-        } end
+        }
     }.
 
 % tests which require started erlroute as gen_server process
-erlroute_started_test_ () -> 
+erlroute_started_test_() -> 
     {setup,
         fun setup_start/0,
+        fun cleanup/1,
         {inparallel, 
              [
                 {<<"When erlroute started is must be register as erlroute">>, 
@@ -467,17 +469,17 @@ erlroute_started_test_ () ->
                                    receive
                                        {From, Ref} -> 
                                            From ! {got, Ref}
-                                   after 1 -> false
+                                   after 20 -> false
                                    end
                             end),
                         erlroute:sub(Type, Source, SubTopic, Pid),
                         Msg = make_ref(),
-                        timer:sleep(1),
+                        timer:sleep(5),
                         erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
                         Ack = 
                             receive
                                 {got, Msg} -> Msg
-                            after 1 -> false
+                            after 20 -> false
                             end,
                         ?assertEqual(Msg, Ack)
                 end},
@@ -493,17 +495,17 @@ erlroute_started_test_ () ->
                                    receive
                                        {From, Ref} -> 
                                            From ! {got, Ref}
-                                   after 1 -> false
+                                   after 20 -> false
                                    end
                             end),
                         erlroute:sub(Type, Source, SubTopic, Pid),
                         Msg = make_ref(),
-                        timer:sleep(1),
+                        timer:sleep(5),
                         erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
                         Ack = 
                             receive
                                 {got, Msg} -> Msg
-                            after 1 -> false
+                            after 20 -> false
                             end,
                         ?assertEqual(false, Ack)
                 end},
@@ -519,17 +521,17 @@ erlroute_started_test_ () ->
                                    receive
                                        {From, Ref} -> 
                                            From ! {got, Ref}
-                                   after 1 -> false
+                                   after 20 -> false
                                    end
                             end),
                         erlroute:sub(Type, Source, SubTopic, Pid),
                         Msg = make_ref(),
-                        timer:sleep(1),
+                        timer:sleep(5),
                         erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
                         Ack = 
                             receive
                                 {got, Msg} -> Msg
-                            after 1 -> false
+                            after 20 -> false
                             end,
                         ?assertEqual(Msg, Ack)
                 end}
@@ -538,22 +540,91 @@ erlroute_started_test_ () ->
          }
      }.
 
+parse_transform_test_() ->
+    {setup,
+        fun setup_start/0,
+        {inparallel, 
+             [
+                {<<"pub/2 should transform to pub/5 (in module clause) and consumer able to get message">>,
+                    fun() ->
+                        Type = by_pid,
+                        Source = self(),
+                        SendTopic = <<"test.topic">>,
+                        SubTopic = <<"*">>,
+                        Pid = spawn_link(
+                            fun() ->
+                                   receive
+                                       {From, Ref} -> 
+                                           From ! {got, Ref}
+                                   after 20 -> false
+                                   end
+                            end),
+                        erlroute:sub(Type, Source, SubTopic, Pid),
+                        Msg = make_ref(),
+                        timer:sleep(5),
+                        publish(SendTopic, {self(), Msg}),
+                        Ack = 
+                            receive
+                                {got, Msg} -> Msg
+                            after 20 -> false
+                            end,
+                        ?assertEqual(Msg, Ack)
+                end},
+                {<<"pub/2 should transform to pub/5 (in test clause) and consumer able to get message">>,
+                    fun() ->
+                        Type = by_pid,
+                        Source = self(),
+                        SendTopic = <<"test.topic">>,
+                        SubTopic = <<"*">>,
+                        Pid = spawn_link(
+                            fun() ->
+                                   receive
+                                       {From, Ref} -> 
+                                           From ! {got, Ref}
+                                   after 20 -> false
+                                   end
+                            end),
+                        erlroute:sub(Type, Source, SubTopic, Pid),
+                        Msg = make_ref(),
+                        timer:sleep(5),
+                        erlroute:pub(SendTopic, {self(), Msg}),
+                        Ack = 
+                            receive
+                                {got, Msg} -> Msg
+                            after 20 -> false
+                            end,
+                        ?assertEqual(Msg, Ack)
+                end}
+            ]
+        }
+    }.
+
+parse_transform2_test_() ->
+    {setup,
+        fun setup_start/0,
+        {inparallel, 
+             [
+                {<<"pub/2 should transform to pub/5 (in test clause) and consumer able to get message">>,
+                    fun() ->
+                        erlroute:pub(<<"testtopic">>, {self(), testmessage})
+                end}
+            ]
+        }
+    }.
+
+publish(Topic,Msg) ->
+    erlroute:pub(Topic, Msg).
+
 setup_start() -> 
-    disable_output(),
+%    disable_output(),
     start_server().
 
 disable_output() ->
     error_logger:tty(false).
 
-cleanup() -> 
-    case whereis(?TESTSERVER) of
-          undefined -> ok;
-          Pid -> 
-            exit(Pid,kill),
-            ?assertEqual(false, is_process_alive(Pid))
-    end.
+cleanup() -> cleanup(true).
 
-start_server() -> application:ensure_started(?TESTSERVER).
+cleanup(_) -> 
+    application:stop(erlroute).
 
-pub01() -> erlroute:pub(<<"test">>,testmessage).
-pub02() -> erlroute:pub(?MODULE, self(), ?LINE, <<"test">>, testmessage).
+start_server() -> application:start(?TESTSERVER).

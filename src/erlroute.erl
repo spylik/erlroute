@@ -154,6 +154,7 @@ code_change(_OldVsn, State, _Extra) ->
 % final clause - if we don't mutch before any clueses, we just 
 % going to dynamic routing part
 pub(Module, Pid, _Line, Topic, Message) ->
+    io:format("Module ~p, Pid ~p, Topic ~p, Message ~p", [Module, Pid, Topic, Message]),
     dyn_route(Module, Pid, Topic, Message).
 
 % dynamic ETS-routes 
@@ -167,6 +168,7 @@ dyn_route(Module, Pid, Topic, Message) ->
 
 % load routing recursion 
 load_routing_and_send(EtsName, Topic, Message) ->
+    io:format("here"),
     try ets:lookup(EtsName, Topic) of 
         [] when Topic =/= <<"*">> -> 
             load_routing_and_send(EtsName, <<"*">>, Message);
@@ -185,6 +187,7 @@ load_routing_and_send(EtsName, Topic, Message) ->
 
 % sending to standart process
 send([{active_route,_,Pid,pid}|T], Message) ->
+    io:format("going to send to ~p",[Pid]),
     Pid ! Message,
     send(T, Message);
 
