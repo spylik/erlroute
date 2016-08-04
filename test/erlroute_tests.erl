@@ -469,7 +469,7 @@ erlroute_started_test_() ->
                                    receive
                                        {From, Ref} -> 
                                            From ! {got, Ref}
-                                   after 20 -> false
+                                   after 50 -> false
                                    end
                             end),
                         erlroute:sub(Type, Source, SubTopic, Pid),
@@ -479,7 +479,7 @@ erlroute_started_test_() ->
                         Ack = 
                             receive
                                 {got, Msg} -> Msg
-                            after 20 -> false
+                            after 50 -> false
                             end,
                         ?assertEqual(Msg, Ack)
                 end},
@@ -495,7 +495,7 @@ erlroute_started_test_() ->
                                    receive
                                        {From, Ref} -> 
                                            From ! {got, Ref}
-                                   after 20 -> false
+                                   after 50 -> false
                                    end
                             end),
                         erlroute:sub(Type, Source, SubTopic, Pid),
@@ -505,7 +505,7 @@ erlroute_started_test_() ->
                         Ack = 
                             receive
                                 {got, Msg} -> Msg
-                            after 20 -> false
+                            after 50 -> false
                             end,
                         ?assertEqual(false, Ack)
                 end},
@@ -521,7 +521,7 @@ erlroute_started_test_() ->
                                    receive
                                        {From, Ref} -> 
                                            From ! {got, Ref}
-                                   after 20 -> false
+                                   after 50 -> false
                                    end
                             end),
                         erlroute:sub(Type, Source, SubTopic, Pid),
@@ -531,7 +531,7 @@ erlroute_started_test_() ->
                         Ack = 
                             receive
                                 {got, Msg} -> Msg
-                            after 20 -> false
+                            after 50 -> false
                             end,
                         ?assertEqual(Msg, Ack)
                 end}
@@ -556,7 +556,7 @@ parse_transform_test_() ->
                                    receive
                                        {From, Ref} -> 
                                            From ! {got, Ref}
-                                   after 20 -> false
+                                   after 50 -> false
                                    end
                             end),
                         erlroute:sub(Type, Source, SubTopic, Pid),
@@ -566,7 +566,7 @@ parse_transform_test_() ->
                         Ack = 
                             receive
                                 {got, Msg} -> Msg
-                            after 20 -> false
+                            after 50 -> false
                             end,
                         ?assertEqual(Msg, Ack)
                 end}
