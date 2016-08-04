@@ -569,44 +569,6 @@ parse_transform_test_() ->
                             after 20 -> false
                             end,
                         ?assertEqual(Msg, Ack)
-                end},
-                {<<"pub/2 should transform to pub/5 (in test clause) and consumer able to get message">>,
-                    fun() ->
-                        Type = by_pid,
-                        Source = self(),
-                        SendTopic = <<"test.topic">>,
-                        SubTopic = <<"*">>,
-                        Pid = spawn_link(
-                            fun() ->
-                                   receive
-                                       {From, Ref} -> 
-                                           From ! {got, Ref}
-                                   after 20 -> false
-                                   end
-                            end),
-                        erlroute:sub(Type, Source, SubTopic, Pid),
-                        Msg = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(SendTopic, {self(), Msg}),
-                        Ack = 
-                            receive
-                                {got, Msg} -> Msg
-                            after 20 -> false
-                            end,
-                        ?assertEqual(Msg, Ack)
-                end}
-            ]
-        }
-    }.
-
-parse_transform2_test_() ->
-    {setup,
-        fun setup_start/0,
-        {inparallel, 
-             [
-                {<<"pub/2 should transform to pub/5 (in test clause) and consumer able to get message">>,
-                    fun() ->
-                        erlroute:pub(<<"testtopic">>, {self(), testmessage})
                 end}
             ]
         }

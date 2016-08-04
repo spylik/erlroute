@@ -28,12 +28,11 @@ walk_ast(Acc, [{attribute, _, module, {Module, _ModArg}}=H|T], _Module, _Name, _
 % standart module
 walk_ast(Acc, [{attribute, _, module, Module}=H|T], _Module, _Name, _Arity) ->
     walk_ast([H|Acc], T, Module, [], []);
-
 % dip only into functions
 walk_ast(Acc, [{function, Line, Name, Arity, Clauses}|T], Module, _Name, _Arity) ->
     walk_ast([{function, Line, Name, Arity, walk_ast([], Clauses, Module, Name, Arity)}|Acc], T, Module, [], []);
 
-%------------- walk_clauses -------------
+%--------- walk function clauses --------
 walk_ast(Acc, [{clause, Line, Arguments, Guards, Body}|T], Module, Name, Arity) ->
     walk_ast([{clause, Line, Arguments, Guards, walk_clause_body([], Body, Module, Name, Arity)}|Acc], T, Module, Name, Arity);
 
@@ -78,18 +77,7 @@ try_transform({call,Line,
                 Msg 
             ]
         }, 
-        io:format("~n~p",[Output]), 
         Output;
 
-try_transform({Type, Line, {clauses, Clauses}}, Module, Name, Arity) -> 
-    io:format("~n in clauses with ~p",[Clauses]),
-    {Type, Line, {clauses, walk_ast([], Clauses, Module, Name, Arity)}};
-
-try_transform({Type, Line, [H|T] = Arguments}, Module, Name, Arity) ->
-    io:format("~n on list2 with ~p",[Arguments]),
-    {Type, Line, [try_transform(H, Module, Name, Arity)|try_transform(T,Module, Name, Arity)]};
-
-
 try_transform(BodyElement, _Module, _Name, _Arity) ->
-%    io:format("~nat end with size ~p ~p",[Size,BodyElement]),
     BodyElement.
