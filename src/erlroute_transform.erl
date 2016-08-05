@@ -53,6 +53,37 @@ walk_clause_body(Acc, [], _Module, _Name, _Arity) ->
 %-------------- transform ---------------
 
 % transform 
+%   erlroute:pub(Message) 
+% to 
+%   erlroute:pub(Module, Pid, Line, Topic, Message)
+% and generate Topic as <<"Module.Line">>
+
+try_transform({call,Line,
+        {remote,Line,
+            {atom,Line,erlroute},{atom,Line,pub}
+        },
+        [
+            Msg
+        ]
+    }, Module, _Name, _Arity) ->
+        Topic = lists:concat([Module,".",Line]),
+        Output = {call,Line,
+            {remote,Line,
+                {atom,Line,erlroute},{atom,Line,pub}
+            },
+            [
+                {atom,Line,Module},
+                {call, Line, {atom, Line ,self}, []},
+                {integer, Line, Line},
+                {bin, Line, [{bin_element,Line,{string,Line,Topic},default,default}]},
+                Msg 
+            ]
+        },
+%        io:format("output is ~p",[Output]),
+        Output;
+
+
+% transform 
 %   erlroute:pub(Topic,Message) 
 % to 
 %   erlroute:pub(Module, Pid, Line, Topic, Message)
@@ -76,7 +107,8 @@ try_transform({call,Line,
                 Topic,
                 Msg 
             ]
-        }, 
+        },
+ %       io:format("output is ~p",[Output]),
         Output;
 
 try_transform(BodyElement, _Module, _Name, _Arity) ->

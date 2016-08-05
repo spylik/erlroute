@@ -10,6 +10,12 @@
 
 % --------------------------------- fixtures ----------------------------------
 
+publish(Msg) ->
+    erlroute:pub(Msg).
+
+publish(Topic,Msg) ->
+    erlroute:pub(Topic, Msg).
+
 % tests for cover standart otp behaviour
 otp_test_() ->
     {setup,
@@ -545,6 +551,31 @@ parse_transform_test_() ->
         fun setup_start/0,
         {inparallel, 
              [
+                {<<"pub/1 should transform to pub/5 (in module clause) and consumer able to get message">>,
+                    fun() ->
+                        Type = by_pid,
+                        Source = self(),
+                        SubTopic = <<"erlroute_tests.14">>,
+                        Pid = spawn_link(
+                            fun() ->
+                                   receive
+                                       {From, Ref} -> 
+                                           From ! {got, Ref}
+                                   after 50 -> false
+                                   end
+                            end),
+                        erlroute:sub(Type, Source, SubTopic, Pid),
+                        Msg = make_ref(),
+                        timer:sleep(5),
+                        publish({self(), Msg}),
+                        Ack = 
+                            receive
+                                {got, Msg} -> Msg
+                            after 50 -> false
+                            end,
+                        ?assertEqual(Msg, Ack)
+                end},
+
                 {<<"pub/2 should transform to pub/5 (in module clause) and consumer able to get message">>,
                     fun() ->
                         Type = by_pid,
@@ -573,9 +604,6 @@ parse_transform_test_() ->
             ]
         }
     }.
-
-publish(Topic,Msg) ->
-    erlroute:pub(Topic, Msg).
 
 setup_start() -> 
 %    disable_output(),
