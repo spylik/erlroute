@@ -131,6 +131,7 @@ handle_info(Msg, State) ->
 
 %-----------end of handle_info-------------
 
+
 terminate(Reason, State) ->
     {noreply, Reason, State}.
 
@@ -153,9 +154,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 % final clause - if we don't mutch before any clueses, we just 
 % going to dynamic routing part
-pub(Module, Pid, _Line, Topic, Message) ->
+pub(Module, Pid, Line, Topic, Message) ->
     io:format("Module ~p, Pid ~p, Topic ~p, Message ~p", [Module, Pid, Topic, Message]),
-    dyn_route(Module, Pid, Topic, Message).
+    dyn_route(Module, Pid, Topic, Message),
+    gen_server:cast(erlroute, {topic_ack, Module, Pid, Line, Topic}).
 
 % dynamic ETS-routes 
 dyn_route(Module, Pid, Topic, Message) ->
