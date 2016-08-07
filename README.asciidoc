@@ -65,7 +65,7 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 [source,erlang]
 ----
 % @doc Shortcut to `erlroute:pub(?MODULE, self(), ?LINE, Topic, Message)` with auto-generated topic.
-% Topic generating by concating ?MODULE and ?LINE and converting to binary. 
+% Topic generating by concating ?MODULE and ?LINE and converting to binary.
 
 -spec erlroute:pub(Message) -> ok 
     when
@@ -104,10 +104,7 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 
 -spec erlroute:sub(Source) -> ok
     when
-        Source  ::  [{module, Module} | {process, Proc} | {topic, Topic} | {poolboy, boolean()}],
-        Module  ::  atom(),
-        Proc    ::  pid() | atom(),
-        Topic   ::  binary().
+        Source  ::  [{module, module()} | {topic, binary()}].
 ----
 
 [source,erlang]
@@ -119,11 +116,11 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 
 -spec erlroute:sub(Source,Dest) -> ok
     when
-        Source  ::  [{module, Module} | {process, Proc} | {topic, Topic} | {poolboy, boolean()}],
+        Source  ::  [{module, module()} | {topic, Topic}],
         Module  ::  atom(),
         Proc    ::  pid() | atom(),
         Topic   ::  binary(),
-        Dest    ::  {pid, Proc} | {registered, atom()} | {poolboy, atom()}.
+        Dest    ::  {process, Proc} | {poolboy, atom()}.
 ----
 
 Examples of usage:
@@ -132,7 +129,7 @@ Examples of usage:
 % Subscribe process with pid <0.39.0> to
 % all messages produced by module testmodule. Any topic, any processID.
 
-erlroute:sub([{module, testmodule}], {pid, <0.39.0>});
+erlroute:sub([{module, testmodule}], {process, <0.39.0>});
 ----
 
 [source,erlang]
@@ -148,7 +145,7 @@ erlroute:sub([{process, testregisteredprocess}], {poolboy, poolname});
 % Subscribe process with registered name `testprocess` to 
 % all messages produced by process with pid `<0.38.0>`. Any topic, any module.
 
-erlroute:sub([{process, <0.38.0>}, {registered, testprocess}]);
+erlroute:sub([{process, <0.38.0>}, {process, testprocess}]);
 ----
 
 [source,erlang]
