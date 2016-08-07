@@ -13,7 +13,8 @@
 -record(active_route, {
         topic :: binary(),
         dest_type :: 'pid' | 'poolboy_pool',
-        dest :: atom()
+        dest :: atom(),
+        method = 'info' ::'call' | 'cast' | 'info'
 	}).
 
 -type proc() :: pid() | atom().

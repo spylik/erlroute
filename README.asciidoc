@@ -4,7 +4,7 @@ image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build S
 
 Erlroute is the simple message router designed for http://www.jpaulmorrison.com/fbp/index.shtml[Flow Based Programming paradigm^].
 
-The main idea is to use `erlroute:pub` everywhere, where you may require the data now or in the future. 
+The main idea is to use `erlroute:pub` everywhere, where you may require the data now or in the future.
 
 Actually, erlroute do simple job - it just send messages to... and "where" you can define later.
 
@@ -50,9 +50,11 @@ Erlroute actually do same job as axons and dendrits. Some neuron generate and pr
 
 == Key feutures:
 
-* native Erlang message passing;
-* flexible routes by module names, processes and topics;
-* support pools as destinations.
+* ets based;
+* very cheap sync 'erlroute:pub';
+* cache per producers modules (separate ets table for each producer module);
+* support pools as destinations;
+* parse transform for build ets-names during compile time.
 
 == Interface
 
@@ -116,10 +118,7 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 
 -spec erlroute:sub(Source,Dest) -> ok
     when
-        Source  ::  [{module, module()} | {topic, Topic}],
-        Module  ::  atom(),
-        Proc    ::  pid() | atom(),
-        Topic   ::  binary(),
+        Source  ::  [{module, module()} | {topic, binary()}],
         Dest    ::  {process, Proc} | {poolboy, atom()}.
 ----
 
