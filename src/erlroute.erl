@@ -11,7 +11,7 @@
 -endif.
 
 -include("erlroute.hrl").
-
+-include("deps/teaser/include/utils.hrl").
 % gen server is here
 -behaviour(gen_server).
 
@@ -47,13 +47,6 @@ stop(async) ->
 -spec init([]) -> {ok, undefined}.
 
 init([]) ->
-    _ = ets:new(msg_routes, [
-            set, 
-            protected, 
-            {keypos, #msg_routes.ets_name}, 
-            {read_concurrency, true}, 
-            named_table
-        ]),
     _ = ets:new(topics, [
             set,
             protected,
@@ -66,15 +59,18 @@ init([]) ->
 
 handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
     Result = subscribe(FlowSource, FlowDest),
-    {reply, Result, State};
+{reply, Result, State};
 
 handle_call({unsubscribe, FlowSource, FlowDest}, _From, State) ->
     unsubscribe(FlowSource, FlowDest),
     {reply, ok, State};
 
-% handle_call for stop
 handle_call(stop, _From, State) ->
-    {stop, normal, State}.
+    {stop, normal, State};
+
+handle_call(Msg, _From, State) ->
+    error_logger:warning_msg("we are in undefined handle_call with message ~p\n",[Msg]),
+    {reply, ok, State}.
 
 %-----------end of handle_call-------------
 
@@ -88,15 +84,17 @@ handle_cast({unsubscribe, FlowSource, FlowDest}, State) ->
     unsubscribe(FlowSource,FlowDest),
     {noreply, State};
 
-% handle_cast for stop
 handle_cast(stop, State) ->
-    {stop, normal, State}.
+    {stop, normal, State};
+
+handle_cast(Msg, State) ->
+    error_logger:warning_msg("we are in undefined handle_cast with message ~p\n",[Msg]),
+    {noreply, State}.
 
 %-----------end of handle_cast-------------
 
 %--------------handle_info-----------------
 
-% handle_info for all other thigs
 handle_info(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle_info with message ~p\n",[Msg]),
     {noreply, State}.
@@ -181,25 +179,26 @@ send([], _Message) -> ok.
     FlowSource  :: flow_source() | nonempty_list(),
     FlowDest    :: flow_dest().
 
+% we don't want to crash gen_server process, so we validating data on caller side
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest}) when 
         is_atom(Module),
         is_binary(Topic),
         DestType =:= 'process' orelse DestType =:= 'poolboy',
-        is_atom(Dest) ->
+        is_pid(Dest) orelse is_atom(Dest) ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest}});
 
-% @doc when we have something another that what doesn't match record #flow_source
-sub(FlowSource, FlowDest) -> 
-    sub([
-        {module, case lists:keyfind(module, 1, FlowSource) of 
+% when FlowSource is_list 
+sub(FlowSource, FlowDest) when is_list(FlowSource) ->
+    sub(#flow_source{
+            module = case lists:keyfind(module, 1, FlowSource) of 
                 false -> undefined; 
-                Data -> Data 
-            end},
-        {topic, case lists:keyfind(topic, 1, FlowSource) of 
+                {module, Data} -> Data
+            end,
+            topic = case lists:keyfind(topic, 1, FlowSource) of 
                 false -> <<"*">>; 
-                Data -> Data 
-            end}
-    ], FlowDest).
+                {topic, Data} -> Data 
+            end
+        }, FlowDest).
 
 -spec subscribe(FlowSource,FlowDest) -> ok when
     FlowSource  ::  flow_source() | nonempty_list(),
@@ -235,7 +234,7 @@ unsubscribe(_FlowSource, _FlowDest) -> ok.
     Module  ::  module().
 
 generate_routing_name(Module) when is_atom(Module)->
-    list_to_atom("$route_" ++ atom_to_list(Module)).
+    list_to_atom("$erlroute_" ++ atom_to_list(Module)).
 
 % check if ets routing table is present, on falure - let's create it 
 -spec route_table_must_present (EtsName) -> ok | {created,ok} when
@@ -243,24 +242,20 @@ generate_routing_name(Module) when is_atom(Module)->
 
 route_table_must_present(EtsName) ->
    case ets:info(EtsName, size) of
-       undefined ->
-           _ = ets:new(EtsName, [
-                   bag, 
-                   protected, 
-                   {read_concurrency, true}, 
-                   {keypos, #active_route.topic}, 
-                   named_table
-               ]),
-           _ = ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
-           {created, EtsName};
+       undefined -> 
+            ets:new(EtsName, [bag, protected, 
+                {read_concurrency, true}, 
+                {keypos, #active_route.topic}, 
+                named_table
+            ]);
        _ ->
            ok
    end.
 
 % @doc split binary topic to the list
--spec split_topic_key(Key) -> Result when
-    Key :: binary(),
-    Result :: nonempty_list().
-
-split_topic_key(Key) ->
-    binary:split(Key, <<".">>).
+%-spec split_topic_key(Key) -> Result when
+%    Key :: binary(),
+%    Result :: nonempty_list().
+%
+%split_topic_key(Key) ->
+%    binary:split(Key, <<".">>).

@@ -109,23 +109,9 @@ erlroute_non_started_test_() ->
                         Type = by_module_name,
                         Source = test_producer,
                         ?assertEqual(
-                            erlroute:generate_routing_name(Type,Source), 
-                            route_by_module_name_test_producer
+                            erlroute:generate_routing_name(Source), 
+                            '$erlroute_test_producer'
                         )
-                    end},
-        
-                {<<"generate_routing_name must generate correct ets table name when Type is by_pid">>, 
-                    fun() ->
-                        Type = by_pid,
-                        Source = self(),
-                        ?assertEqual(
-                           erlroute:generate_routing_name(Type,Source), 
-                           list_to_atom(
-                           lists:concat([
-                                atom_to_list(route_by_pid_), 
-                                pid_to_list(Source)
-                            ]))
-                          )
                     end}
             ]
         }
@@ -173,380 +159,434 @@ erlroute_started_test_() ->
                            true, 
                            is_pid(whereis(?TESTSERVER))
                        ) 
-                   end},
+                   end}
+            ]
+        }
+    }.
 
-                {<<"When erlroute is going to start ets-table msg_routes must be created">>, 
+erlroute_messaging_test_() ->
+    {setup,
+        fun setup_start/0,
+        fun cleanup/1,
+        {inparallel, 
+             [
+                {<<"After sub/2 with full parameters and topic <<\"*\">>, ets tables must present and route entry must present in ets">>, 
                     fun() ->
-                        ?assertNotEqual(
-                           undefined, 
-                           ets:info(msg_routes)
-                          ) 
-                    end},
-
-                % ------------------------ sync tests --------------------------- %
-                {<<"After sync sub/6, ets tables must present and route entry must present in ets">>, 
-                    fun() -> 
-                        Type = by_module_name,
-                        Source = test_producer_sync6,
+                        % source 
+                        Module = mlibs:random_atom(),
                         Topic = <<"*">>,
+                        % dest
+                        DestType = process,
                         Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        erlroute:sub(sync, Type, Source, Topic, Dest, DestType),
+
+                        EtsTable = erlroute:generate_routing_name(Module),
+                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
                         MS = [{
                                 #active_route{
                                     topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
+                                    dest_type = DestType,
+                                    dest = Dest
                                 },
                                 [],
                                 [true]
                             }],
                         ?assertEqual(1, ets:select_count(EtsTable, MS))
                     end},
-        
+                {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>, 
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        Topic = <<"*">>,
+                        % dest
+                        DestType = process,
+                        Dest = self(),
+
+                        EtsTable = erlroute:generate_routing_name(Module),
+                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest}),
+                        MS = [{
+                                #active_route{
+                                    topic = Topic, 
+                                    dest_type = DestType,
+                                    dest = Dest
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count(EtsTable, MS))
+                    end},
+
+                {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>, 
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        Topic = <<"*">>,
+                        % dest
+                        DestType = process,
+                        Dest = self(),
+
+                        EtsTable = erlroute:generate_routing_name(Module),
+                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest}),
+                        MS = [{
+                                #active_route{
+                                    topic = Topic, 
+                                    dest_type = DestType,
+                                    dest = Dest
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count(EtsTable, MS))
+                    end},
+
+                {<<"After sub/2 without topic it should subscribe to <<\"*\">>">>, 
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        Topic = <<"*">>,
+                        % dest
+                        DestType = process,
+                        Dest = self(),
+
+                        EtsTable = erlroute:generate_routing_name(Module),
+                        erlroute:sub([{module, Module}], {DestType, Dest}),
+                        MS = [{
+                                #active_route{
+                                    topic = Topic, 
+                                    dest_type = DestType,
+                                    dest = Dest
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count(EtsTable, MS))
+                    end},
+       
                 {<<"After multiple sync sub/6 attempts, ets tables must have only one route entry for each type/source">>, 
                     fun() -> 
-                        Type = by_module_name,
-                        Source = test_producer_sub_sync6_multiple,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        erlroute:sub(sync, Type, Source, Topic, Dest, DestType),
-                        erlroute:sub(sync, Type, Source, Topic, Dest, DestType),
-                        erlroute:sub(sync, Type, Source, Topic, Dest, DestType),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                               [],
-                               [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-        
-                {<<"Sync sub/5 must work same as sub/6 with DestType=pid">>, 
-                    fun() -> 
-                        Type = by_module_name,
-                        Source = test_producer_sub_sync5,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        erlroute:sub(sync, Type, Source, Topic, Dest),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                     end},
-        
-                 {<<"After sync unsub/6, ets table must do not contain route entry">>,
-                     fun() ->
-                         Type = by_module_name,
-                         Source = test_producer_unsub_sync6,
+                         % source 
+                         Module = mlibs:random_atom(),
                          Topic = <<"*">>,
+                         % dest
+                         DestType = process,
                          Dest = self(),
-                         DestType = pid,
-                         EtsTable = erlroute:generate_routing_name(Type, Source),
+                
+                         EtsTable = erlroute:generate_routing_name(Module),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
                          MS = [{
                                  #active_route{
                                      topic = Topic, 
-                                     dest = Dest, 
-                                     dest_type = DestType
+                                     dest_type = DestType,
+                                     dest = Dest
                                  },
                                  [],
                                  [true]
                              }],
-                         erlroute:sub(sync, Type, Source, Topic, Dest, DestType),
-                         ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                         erlroute:unsub(sync, Type, Source, Topic, Dest, DestType),
-                         ?assertEqual(0, ets:select_count(EtsTable, MS))
-                     end},
-        
-                {<<"Sync unsub/5 must work same as unsub/5 with DestType=pid">>,
-                    fun() ->
-                        Type = by_module_name,
-                        Source = test_producer_unsub_sync5,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                                [],
-                                [true]
-                            }],
-                        erlroute:sub(sync, Type, Source, Topic, Dest),
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub(sync, Type, Source, Topic, Dest),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-        
-                % ---------------------- end of sync tests ---------------------- %
-                % ------------------------- async tests ------------------------- %
-                {<<"After async sub/6, ets tables must present and route entry must present in ets">>, 
-                    fun() -> 
-                        Type = by_module_name,
-                        Source = test_producer_async6,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        erlroute:sub(async, Type, Source, Topic, Dest, DestType),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                                [],
-                                [true]
-                            }],
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-
-                {<<"After multiple async sub/6 attempts, ets tables must have only one route entry for each type/source">>, 
-                    fun() -> 
-                        Type = by_module_name,
-                        Source = test_producer_sub_async6_multiple,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        erlroute:sub(async, Type, Source, Topic, Dest, DestType),
-                        erlroute:sub(async, Type, Source, Topic, Dest, DestType),
-                        erlroute:sub(async, Type, Source, Topic, Dest, DestType),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                               [],
-                               [true]
-                            }],
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-        
-                {<<"Async sub/5 must work same as sub/6 with DestType=pid">>, 
-                    fun() -> 
-                        Type = by_module_name,
-                        Source = test_producer_sub_async5,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        erlroute:sub(async, Type, Source, Topic, Dest),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                                [],
-                                [true]
-                            }],
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-
-                {<<"sub/4 must work same as sub/6 with sync DestType=pid">>, 
-                    fun() -> 
-                        Type = by_module_name,
-                        Source = test_producer_sub_async5,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        erlroute:sub(Type, Source, Topic, Dest),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                                [],
-                                [true]
-                            }],
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-
-
-                {<<"After async unsub/6, ets table must do not contain route entry">>,
-                    fun() ->
-                        Type = by_module_name,
-                        Source = test_producer_unsub_async6,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                                [],
-                                [true]
-                            }],
-                        erlroute:sub(async, Type, Source, Topic, Dest, DestType),
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub(async, Type, Source, Topic, Dest, DestType),
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-        
-                {<<"Async unsub/5 must work same as unsub/6 with DestType=pid">>,
-                    fun() ->
-                        Type = by_module_name,
-                        Source = test_producer_unsub_async5,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                                [],
-                                [true]
-                            }],
-                        erlroute:sub(async, Type, Source, Topic, Dest),
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub(async, Type, Source, Topic, Dest),
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-
-                {<<"Async unsub/4 must work same as unsub/6 with async DestType=pid">>,
-                    fun() ->
-                        Type = by_module_name,
-                        Source = test_producer_unsub_async4,
-                        Topic = <<"*">>,
-                        Dest = self(),
-                        DestType = pid,
-                        EtsTable = erlroute:generate_routing_name(Type, Source),
-                        MS = [{
-                                #active_route{
-                                    topic = Topic, 
-                                    dest = Dest, 
-                                    dest_type = DestType
-                                },
-                                [],
-                                [true]
-                            }],
-                        erlroute:sub(Type, Source, Topic, Dest),
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub(Type, Source, Topic, Dest),
-                        timer:sleep(75), % for async cast
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                % ---------------------- end of async tests --------------------- %
-
-                {<<"Erlroute able to deliver message to single subscriber with specified topic">>,
-                    fun() ->
-                        Type = by_pid,
-                        Source = self(),
-                        SendTopic = <<"test.topic">>,
-                        SubTopic = <<"test.topic">>,
-                        Pid = spawn_link(
-                            fun() ->
-                                   receive
-                                       {From, Ref} -> 
-                                           From ! {got, Ref}
-                                   after 50 -> false
-                                   end
-                            end),
-                        erlroute:sub(Type, Source, SubTopic, Pid),
-                        Msg = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
-                        Ack = 
-                            receive
-                                {got, Msg} -> Msg
-                            after 50 -> false
-                            end,
-                        ?assertEqual(Msg, Ack)
-                end},
-
-                {<<"Erlroute must do not deliver message when consumer subscribe to another topic than producer send and consumer do not use <<\"*\">> for subscribe">>,
-                    fun() ->
-                        Type = by_pid,
-                        Source = self(),
-                        SendTopic = <<"test.topic">>,
-                        SubTopic = <<"test.topic1">>,
-                        Pid = spawn_link(
-                            fun() ->
-                                   receive
-                                       {From, Ref} -> 
-                                           From ! {got, Ref}
-                                   after 50 -> false
-                                   end
-                            end),
-                        erlroute:sub(Type, Source, SubTopic, Pid),
-                        Msg = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
-                        Ack = 
-                            receive
-                                {got, Msg} -> Msg
-                            after 50 -> false
-                            end,
-                        ?assertEqual(false, Ack)
-                end},
-
-                {<<"Consumers subscribed to <<\"*\">> topic must able to get all messages from specified producer">>,
-                    fun() ->
-                        Type = by_pid,
-                        Source = self(),
-                        SendTopic = <<"test.topic">>,
-                        SubTopic = <<"*">>,
-                        Pid = spawn_link(
-                            fun() ->
-                                   receive
-                                       {From, Ref} -> 
-                                           From ! {got, Ref}
-                                   after 50 -> false
-                                   end
-                            end),
-                        erlroute:sub(Type, Source, SubTopic, Pid),
-                        Msg = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
-                        Ack = 
-                            receive
-                                {got, Msg} -> Msg
-                            after 50 -> false
-                            end,
-                        ?assertEqual(Msg, Ack)
-                end}
+                         ?assertEqual(1, ets:select_count(EtsTable, MS))
+                    end}
+%       
+%                {<<"After sync unsub/6, ets table must do not contain route entry">>,
+%                    fun() ->
+%                        Type = by_module_name,
+%                        Source = test_producer_unsub_sync6,
+%                        Topic = <<"*">>,
+%                        Dest = self(),
+%                        DestType = pid,
+%                        EtsTable = erlroute:generate_routing_name(Type, Source),
+%                        MS = [{
+%                                #active_route{
+%                                    topic = Topic, 
+%                                    dest = Dest, 
+%                                    dest_type = DestType
+%                                },
+%                                [],
+%                                [true]
+%                            }],
+%                        erlroute:sub(sync, Type, Source, Topic, Dest, DestType),
+%                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
+%                        erlroute:unsub(sync, Type, Source, Topic, Dest, DestType),
+%                        ?assertEqual(0, ets:select_count(EtsTable, MS))
+%                    end},
+%       
+%               {<<"Sync unsub/5 must work same as unsub/5 with DestType=pid">>,
+%                   fun() ->
+%                       Type = by_module_name,
+%                       Source = test_producer_unsub_sync5,
+%                       Topic = <<"*">>,
+%                       Dest = self(),
+%                       DestType = pid,
+%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       MS = [{
+%                               #active_route{
+%                                   topic = Topic, 
+%                                   dest = Dest, 
+%                                   dest_type = DestType
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       erlroute:sub(sync, Type, Source, Topic, Dest),
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS)),
+%                       erlroute:unsub(sync, Type, Source, Topic, Dest),
+%                       ?assertEqual(0, ets:select_count(EtsTable, MS))
+%                   end},
+%       
+%               % ---------------------- end of sync tests ---------------------- %
+%               % ------------------------- async tests ------------------------- %
+%               {<<"After async sub/6, ets tables must present and route entry must present in ets">>, 
+%                   fun() -> 
+%                       Type = by_module_name,
+%                       Source = test_producer_async6,
+%                       Topic = <<"*">>,
+%                       Dest = self(),
+%                       DestType = pid,
+%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       erlroute:sub(async, Type, Source, Topic, Dest, DestType),
+%                       MS = [{
+%                               #active_route{
+%                                   topic = Topic, 
+%                                   dest = Dest, 
+%                                   dest_type = DestType
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%
+%               {<<"After multiple async sub/6 attempts, ets tables must have only one route entry for each type/source">>, 
+%                   fun() -> 
+%                       Type = by_module_name,
+%                       Source = test_producer_sub_async6_multiple,
+%                       Topic = <<"*">>,
+%                       Dest = self(),
+%                       DestType = pid,
+%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       erlroute:sub(async, Type, Source, Topic, Dest, DestType),
+%                       erlroute:sub(async, Type, Source, Topic, Dest, DestType),
+%                       erlroute:sub(async, Type, Source, Topic, Dest, DestType),
+%                       MS = [{
+%                               #active_route{
+%                                   topic = Topic, 
+%                                   dest = Dest, 
+%                                   dest_type = DestType
+%                               },
+%                              [],
+%                              [true]
+%                           }],
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%       
+%               {<<"Async sub/5 must work same as sub/6 with DestType=pid">>, 
+%                   fun() -> 
+%                       Type = by_module_name,
+%                       Source = test_producer_sub_async5,
+%                       Topic = <<"*">>,
+%                       Dest = self(),
+%                       DestType = pid,
+%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       erlroute:sub(async, Type, Source, Topic, Dest),
+%                       MS = [{
+%                               #active_route{
+%                                   topic = Topic, 
+%                                   dest = Dest, 
+%                                   dest_type = DestType
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%
+%               {<<"sub/4 must work same as sub/6 with sync DestType=pid">>, 
+%                   fun() -> 
+%                       Type = by_module_name,
+%                       Source = test_producer_sub_async5,
+%                       Topic = <<"*">>,
+%                       Dest = self(),
+%                       DestType = pid,
+%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       erlroute:sub(Type, Source, Topic, Dest),
+%                       MS = [{
+%                               #active_route{
+%                                   topic = Topic, 
+%                                   dest = Dest, 
+%                                   dest_type = DestType
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%
+%
+%               {<<"After async unsub/6, ets table must do not contain route entry">>,
+%                   fun() ->
+%                       Type = by_module_name,
+%                       Source = test_producer_unsub_async6,
+%                       Topic = <<"*">>,
+%                       Dest = self(),
+%                       DestType = pid,
+%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       MS = [{
+%                               #active_route{
+%                                   topic = Topic, 
+%                                   dest = Dest, 
+%                                   dest_type = DestType
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       erlroute:sub(async, Type, Source, Topic, Dest, DestType),
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS)),
+%                       erlroute:unsub(async, Type, Source, Topic, Dest, DestType),
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(0, ets:select_count(EtsTable, MS))
+%                   end},
+%       
+%               {<<"Async unsub/5 must work same as unsub/6 with DestType=pid">>,
+%                   fun() ->
+%                       Type = by_module_name,
+%                       Source = test_producer_unsub_async5,
+%                       Topic = <<"*">>,
+%                       Dest = self(),
+%                       DestType = pid,
+%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       MS = [{
+%                               #active_route{
+%                                   topic = Topic, 
+%                                   dest = Dest, 
+%                                   dest_type = DestType
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       erlroute:sub(async, Type, Source, Topic, Dest),
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS)),
+%                       erlroute:unsub(async, Type, Source, Topic, Dest),
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(0, ets:select_count(EtsTable, MS))
+%                   end},
+%
+%               {<<"Async unsub/4 must work same as unsub/6 with async DestType=pid">>,
+%                   fun() ->
+%                       Type = by_module_name,
+%                       Source = test_producer_unsub_async4,
+%                       Topic = <<"*">>,
+%                       Dest = self(),
+%                       DestType = pid,
+%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       MS = [{
+%                               #active_route{
+%                                   topic = Topic, 
+%                                   dest = Dest, 
+%                                   dest_type = DestType
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       erlroute:sub(Type, Source, Topic, Dest),
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS)),
+%                       erlroute:unsub(Type, Source, Topic, Dest),
+%                       timer:sleep(75), % for async cast
+%                       ?assertEqual(0, ets:select_count(EtsTable, MS))
+%                   end},
+%               % ---------------------- end of async tests --------------------- %
+%
+%               {<<"Erlroute able to deliver message to single subscriber with specified topic">>,
+%                   fun() ->
+%                       Type = by_pid,
+%                       Source = self(),
+%                       SendTopic = <<"test.topic">>,
+%                       SubTopic = <<"test.topic">>,
+%                       Pid = spawn_link(
+%                           fun() ->
+%                                  receive
+%                                      {From, Ref} -> 
+%                                          From ! {got, Ref}
+%                                  after 50 -> false
+%                                  end
+%                           end),
+%                       erlroute:sub(Type, Source, SubTopic, Pid),
+%                       Msg = make_ref(),
+%                       timer:sleep(5),
+%                       erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
+%                       Ack = 
+%                           receive
+%                               {got, Msg} -> Msg
+%                           after 50 -> false
+%                           end,
+%                       ?assertEqual(Msg, Ack)
+%               end},
+%
+%               {<<"Erlroute must do not deliver message when consumer subscribe to another topic than producer send and consumer do not use <<\"*\">> for subscribe">>,
+%                   fun() ->
+%                       Type = by_pid,
+%                       Source = self(),
+%                       SendTopic = <<"test.topic">>,
+%                       SubTopic = <<"test.topic1">>,
+%                       Pid = spawn_link(
+%                           fun() ->
+%                                  receive
+%                                      {From, Ref} -> 
+%                                          From ! {got, Ref}
+%                                  after 50 -> false
+%                                  end
+%                           end),
+%                       erlroute:sub(Type, Source, SubTopic, Pid),
+%                       Msg = make_ref(),
+%                       timer:sleep(5),
+%                       erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
+%                       Ack = 
+%                           receive
+%                               {got, Msg} -> Msg
+%                           after 50 -> false
+%                           end,
+%                       ?assertEqual(false, Ack)
+%               end},
+%
+%               {<<"Consumers subscribed to <<\"*\">> topic must able to get all messages from specified producer">>,
+%                   fun() ->
+%                       Type = by_pid,
+%                       Source = self(),
+%                       SendTopic = <<"test.topic">>,
+%                       SubTopic = <<"*">>,
+%                       Pid = spawn_link(
+%                           fun() ->
+%                                  receive
+%                                      {From, Ref} -> 
+%                                          From ! {got, Ref}
+%                                  after 50 -> false
+%                                  end
+%                           end),
+%                       erlroute:sub(Type, Source, SubTopic, Pid),
+%                       Msg = make_ref(),
+%                       timer:sleep(5),
+%                       erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
+%                       Ack = 
+%                           receive
+%                               {got, Msg} -> Msg
+%                           after 50 -> false
+%                           end,
+%                       ?assertEqual(Msg, Ack)
+%               end}
 
              ]
          }
      }.
 
-parse_transform_test_() ->
+parse_transform_tes() ->
     {setup,
         fun setup_start/0,
         {inparallel, 
@@ -617,4 +657,4 @@ cleanup() -> cleanup(true).
 cleanup(_) -> 
     application:stop(erlroute).
 
-start_server() -> application:start(?TESTSERVER).
+start_server() -> application:ensure_started(?TESTSERVER).
