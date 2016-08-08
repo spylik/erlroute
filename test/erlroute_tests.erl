@@ -106,7 +106,6 @@ erlroute_non_started_test_() ->
         
                 {<<"generate_routing_name must generate correct ets table name when Type is by_module_name">>,
                     fun() ->
-                        Type = by_module_name,
                         Source = test_producer,
                         ?assertEqual(
                             erlroute:generate_routing_name(Source), 
@@ -164,7 +163,7 @@ erlroute_started_test_() ->
         }
     }.
 
-erlroute_simple_defined_module_wildcard_topic_messaging_test_() ->
+erlroute_simple_defined_module_full_topic_messaging_test_() ->
     {setup,
         fun setup_start/0,
         fun cleanup/1,
@@ -297,7 +296,127 @@ erlroute_simple_defined_module_wildcard_topic_messaging_test_() ->
                                  [true]
                              }],
                          ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end}
+                    end},
+                {<<"Erlroute able to deliver message to single subscriber with exactly the same topic">>,
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        SendTopic = <<"testtopic">>,
+                        SubTopic = <<"testtopic">>,
+                        % dest
+                        DestType = process,
+                        Dest = tutils:spawn_wait_loop(self()),
+                        Method = info,
+                
+                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+                        Msg = make_ref(),
+                        timer:sleep(5),
+                        erlroute:pub(Module, self(), ?LINE, SendTopic, Msg),
+                        Ack = tutils:recieve_loop(),
+                        ?assertEqual([Msg], Ack),
+                        Dest ! stop
+                end},
+
+                {<<"Erlroute able to deliver message to single subscriber who subscribe to wilcard topic">>,
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        SendTopic = <<"testtopic">>,
+                        SubTopic = <<"*">>,
+                        % dest
+                        DestType = process,
+                        Dest = tutils:spawn_wait_loop(self()),
+                        ?debugVal(Dest),
+                        Method = info,
+                
+                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+                        Msg = make_ref(),
+                        timer:sleep(5),
+                        erlroute:pub(Module, self(), ?LINE, SendTopic, Msg),
+                        Ack = tutils:recieve_loop(),
+                        ?assertEqual([Msg], Ack),
+                        Dest ! stop
+                end},
+
+                {<<"Erlroute able to deliver multiple message with different topic to single subscriber who subscribe to wilcard topic from same module">>,
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        SendTopic1 = <<"testtopic1">>,
+                        SendTopic2 = <<"testtopic2">>,
+                        SubTopic = <<"*">>,
+                        % dest
+                        DestType = process,
+                        Dest = tutils:spawn_wait_loop(self()),
+                        ?debugVal(Dest),
+                        Method = info,
+                
+                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+                        Msg1 = make_ref(),
+                        Msg2 = make_ref(),
+                        timer:sleep(5),
+                        erlroute:pub(Module, self(), ?LINE, SendTopic1, Msg1),
+                        erlroute:pub(Module, self(), ?LINE, SendTopic2, Msg2),
+                        Ack = tutils:recieve_loop(),
+                        ?assertEqual([Msg2, Msg1], Ack),
+                        Dest ! stop
+                end},
+                {<<"Messages from another module should do not delivered to another module subscribers">>,
+                    fun() ->
+                        % source 
+                        Module1 = mlibs:random_atom(),
+                        Module2 = mlibs:random_atom(),
+                        SendTopic1 = <<"testtopic1">>,
+                        SendTopic2 = <<"testtopic2">>,
+                        SendTopic3 = <<"testtopic3">>,
+                        SubTopic = <<"*">>,
+                        % dest
+                        DestType = process,
+                        Dest = tutils:spawn_wait_loop(self()),
+                        ?debugVal(Dest),
+                        Method = info,
+                
+                        erlroute:sub([{module, Module1}, {topic, SubTopic}], {DestType, Dest, Method}),
+                        Msg1 = make_ref(),
+                        Msg2 = make_ref(),
+                        Msg3 = make_ref(),
+
+                        timer:sleep(5),
+                        erlroute:pub(Module1, self(), ?LINE, SendTopic1, Msg1),
+                        erlroute:pub(Module1, self(), ?LINE, SendTopic2, Msg2),
+                        erlroute:pub(Module2, self(), ?LINE, SendTopic3, Msg3),
+                        Ack = tutils:recieve_loop(),
+                        ?assertEqual([Msg2, Msg1], Ack),
+                        Dest ! stop
+                end}
+
+%               {<<"Consumers subscribed to <<\"*\">> topic must able to get all messages from specified producer">>,
+%                   fun() ->
+%                       Type = by_pid,
+%                       Source = self(),
+%                       SendTopic = <<"test.topic">>,
+%                       SubTopic = <<"*">>,
+%                       Pid = spawn_link(
+%                           fun() ->
+%                                  receive
+%                                      {From, Ref} -> 
+%                                          From ! {got, Ref}
+%                                  after 50 -> false
+%                                  end
+%                           end),
+%                       erlroute:sub(Type, Source, SubTopic, Pid),
+%                       Msg = make_ref(),
+%                       timer:sleep(5),
+%                       erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
+%                       Ack = 
+%                           receive
+%                               {got, Msg} -> Msg
+%                           after 50 -> false
+%                           end,
+%                       ?assertEqual(Msg, Ack)
+%               end},
+
+
 %       
 %                {<<"After sync unsub/6, ets table must do not contain route entry">>,
 %                    fun() ->
@@ -511,87 +630,8 @@ erlroute_simple_defined_module_wildcard_topic_messaging_test_() ->
 %                       erlroute:unsub(Type, Source, Topic, Dest),
 %                       timer:sleep(75), % for async cast
 %                       ?assertEqual(0, ets:select_count(EtsTable, MS))
-%                   end},
-%               % ---------------------- end of async tests --------------------- %
+%                   end}
 %
-%               {<<"Erlroute able to deliver message to single subscriber with specified topic">>,
-%                   fun() ->
-%                       Type = by_pid,
-%                       Source = self(),
-%                       SendTopic = <<"test.topic">>,
-%                       SubTopic = <<"test.topic">>,
-%                       Pid = spawn_link(
-%                           fun() ->
-%                                  receive
-%                                      {From, Ref} -> 
-%                                          From ! {got, Ref}
-%                                  after 50 -> false
-%                                  end
-%                           end),
-%                       erlroute:sub(Type, Source, SubTopic, Pid),
-%                       Msg = make_ref(),
-%                       timer:sleep(5),
-%                       erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
-%                       Ack = 
-%                           receive
-%                               {got, Msg} -> Msg
-%                           after 50 -> false
-%                           end,
-%                       ?assertEqual(Msg, Ack)
-%               end},
-%
-%               {<<"Erlroute must do not deliver message when consumer subscribe to another topic than producer send and consumer do not use <<\"*\">> for subscribe">>,
-%                   fun() ->
-%                       Type = by_pid,
-%                       Source = self(),
-%                       SendTopic = <<"test.topic">>,
-%                       SubTopic = <<"test.topic1">>,
-%                       Pid = spawn_link(
-%                           fun() ->
-%                                  receive
-%                                      {From, Ref} -> 
-%                                          From ! {got, Ref}
-%                                  after 50 -> false
-%                                  end
-%                           end),
-%                       erlroute:sub(Type, Source, SubTopic, Pid),
-%                       Msg = make_ref(),
-%                       timer:sleep(5),
-%                       erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
-%                       Ack = 
-%                           receive
-%                               {got, Msg} -> Msg
-%                           after 50 -> false
-%                           end,
-%                       ?assertEqual(false, Ack)
-%               end},
-%
-%               {<<"Consumers subscribed to <<\"*\">> topic must able to get all messages from specified producer">>,
-%                   fun() ->
-%                       Type = by_pid,
-%                       Source = self(),
-%                       SendTopic = <<"test.topic">>,
-%                       SubTopic = <<"*">>,
-%                       Pid = spawn_link(
-%                           fun() ->
-%                                  receive
-%                                      {From, Ref} -> 
-%                                          From ! {got, Ref}
-%                                  after 50 -> false
-%                                  end
-%                           end),
-%                       erlroute:sub(Type, Source, SubTopic, Pid),
-%                       Msg = make_ref(),
-%                       timer:sleep(5),
-%                       erlroute:pub(?MODULE, self(), ?LINE, SendTopic, {self(), Msg}),
-%                       Ack = 
-%                           receive
-%                               {got, Msg} -> Msg
-%                           after 50 -> false
-%                           end,
-%                       ?assertEqual(Msg, Ack)
-%               end}
-
              ]
          }
      }.
@@ -656,7 +696,7 @@ parse_transform_tes() ->
     }.
 
 setup_start() -> 
-%    disable_output(),
+    disable_output(),
     start_server().
 
 disable_output() ->

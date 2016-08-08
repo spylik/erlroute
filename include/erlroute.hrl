@@ -10,15 +10,17 @@
         flow_dest/0
     ]).
 
+-type topic() :: binary().
+-type proc() :: pid() | atom().
+-type method() :: 'info' | 'cast' | 'call'.
+
 -record(active_route, {
-        topic :: binary(),
+        topic :: topic(),
+        topic_childs = false :: boolean() | topic(),
         dest_type :: 'pid' | 'poolboy_pool',
         dest :: atom(),
         method = 'info' ::'call' | 'cast' | 'info'
 	}).
-
--type proc() :: pid() | atom().
--type method() :: 'info' | 'cast' | 'call'.
 
 -record(topics, {
         topic :: binary(),
@@ -34,7 +36,6 @@
     }).
 
 -type flow_source() :: #flow_source{}.
-
 -type flow_dest() :: {process, proc(), method()} | {poolboy, atom(), method()}.
 
 

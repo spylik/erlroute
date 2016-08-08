@@ -24,6 +24,8 @@
         start_link/0,
         stop/0, stop/1,
         pub/5,
+        full_async_pub/5,
+        full_sync_pub/5,
         sub/2
     ]).
 
@@ -62,7 +64,7 @@ handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
     {reply, Result, State};
 
 handle_call({unsubscribe, FlowSource, FlowDest}, _From, State) ->
-%    unsubscribe(FlowSource, FlowDest),
+    unsubscribe(FlowSource, FlowDest),
     {reply, ok, State};
 
 handle_call(stop, _From, State) ->
@@ -81,7 +83,7 @@ handle_cast({subscribe, FlowSource, FlowDest}, State) ->
     {noreply, State};
 
 handle_cast({unsubscribe, FlowSource, FlowDest}, State) ->
-%    unsubscribe(FlowSource,FlowDest),
+    unsubscribe(FlowSource,FlowDest),
     {noreply, State};
 
 handle_cast(stop, State) ->
@@ -236,6 +238,10 @@ sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, 
         Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
+% when Dest is pid() or atom
+sub(FlowSource, FlowDest) when is_pid(FlowDest) orelse is_atom(FlowDest) ->
+    sub(FlowSource, {process, FlowDest, info});
+
 % when FlowSource is_list 
 sub(FlowSource, FlowDest) when is_list(FlowSource) ->
     sub(#flow_source{
@@ -266,7 +272,7 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
 % ================================ end of sub part =============================
 % ----------------------------------- unsub part -------------------------------
 
-
+unsubscribe(_FlowSource,_FlowDest) -> ok.
 % ================================ end of sub part =============================
 
 
