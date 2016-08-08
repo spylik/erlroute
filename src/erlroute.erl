@@ -50,7 +50,7 @@ stop(async) ->
 
 init([]) ->
     _ = ets:new(topics, [
-            set,
+            bag,
             protected,
             {keypos, #topics.topic},
             named_table
@@ -77,6 +77,24 @@ handle_call(Msg, _From, State) ->
 %-----------end of handle_call-------------
 
 %--------------handle_cast-----------------
+
+handle_cast({new_msg, Module, Process, Line, Topic, _Message, EtsName, _WhoGetWhileSync}, State) ->
+    TopicsKey = split_topic_key(Topic),
+    ets:insert(topics, #topics{
+            topic = Topic, 
+            words = TopicsKey,
+            module = Module,
+            line = Line,
+            process = Process
+        }),
+    MS = [{#active_route{is_final_topic = true, _ = '_'},
+            [], 
+            ['$_']
+        }],
+    lists:map(fun(#active_route{topic = Top, words = Words}) ->
+        ?debug("Topic is ~p, Words is ~p",[Top, Words])
+        end, ets:select(EtsName, MS)),
+    {noreply, State};
 
 handle_cast({subscribe, FlowSource, FlowDest}, State) ->
     subscribe(FlowSource,FlowDest),
@@ -265,7 +283,8 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
         _ ->
             EtsName = generate_routing_name(Module),
             _ = route_table_must_present(EtsName),
-            ets:insert(EtsName, #active_route{topic=Topic, dest_type=DestType, dest=Dest, method=Method})
+            {IsFinal, Words} = is_final_topic(Topic),
+            ets:insert(EtsName, #active_route{topic=Topic, dest_type=DestType, dest=Dest, method=Method, is_final_topic=IsFinal,words=Words})
     end.
 
 
@@ -302,10 +321,21 @@ route_table_must_present(EtsName) ->
            ok
    end.
 
+-spec is_final_topic(Topic) -> Result when
+    Topic :: topic(),
+    Result :: {boolean(), nonempty_list()}.
+
+is_final_topic(<<"*">>) -> {true, undefined};
+is_final_topic(Topic) ->
+    case binary:match(Topic, [<<"*">>,<<"!">>]) of
+        nomatch -> {true, undefined};
+        _ -> {false, split_topic_key(Topic)}
+    end.
+    
 % @doc split binary topic to the list
-%-spec split_topic_key(Key) -> Result when
-%    Key :: binary(),
-%    Result :: nonempty_list().
-%
-%split_topic_key(Key) ->
-%    binary:split(Key, <<".">>).
+-spec split_topic_key(Key) -> Result when
+    Key :: binary(),
+    Result :: nonempty_list().
+
+split_topic_key(Key) ->
+    binary:split(Key, <<".">>).

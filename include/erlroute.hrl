@@ -13,14 +13,26 @@
 -type topic() :: binary().
 -type proc() :: pid() | atom().
 -type method() :: 'info' | 'cast' | 'call'.
+-type id() :: {neg_integer(), pos_integer()}.
 
 -record(active_route, {
         topic :: topic(),
-        topic_childs = false :: boolean() | topic(),
+        dest_type :: 'pid' | 'poolboy_pool',
+        dest :: atom(),
+        method = 'info' ::'call' | 'cast' | 'info',
+        is_final_topic = true :: boolean(),
+        parent_topic = 'undefined' :: 'undefined' | binary(),
+        words = 'undefined' :: 'undefined' | nonempty_list()
+	}).
+
+-record(subscribers_by_topic_only, {
+        topic :: topic(),
+        topic_words :: nonempty_list(),
+        module :: 'undefined' | module(),
         dest_type :: 'pid' | 'poolboy_pool',
         dest :: atom(),
         method = 'info' ::'call' | 'cast' | 'info'
-	}).
+    }).
 
 -record(topics, {
         topic :: binary(),
