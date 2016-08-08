@@ -164,7 +164,7 @@ erlroute_started_test_() ->
         }
     }.
 
-erlroute_messaging_test_() ->
+erlroute_simple_defined_module_wildcard_topic_messaging_test_() ->
     {setup,
         fun setup_start/0,
         fun cleanup/1,
@@ -178,14 +178,16 @@ erlroute_messaging_test_() ->
                         % dest
                         DestType = process,
                         Dest = self(),
+                        Method = info,
 
                         EtsTable = erlroute:generate_routing_name(Module),
-                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
+                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                         MS = [{
                                 #active_route{
                                     topic = Topic, 
                                     dest_type = DestType,
-                                    dest = Dest
+                                    dest = Dest,
+                                    method = Method
                                 },
                                 [],
                                 [true]
@@ -200,14 +202,16 @@ erlroute_messaging_test_() ->
                         % dest
                         DestType = process,
                         Dest = self(),
+                        Method = info,
 
                         EtsTable = erlroute:generate_routing_name(Module),
-                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest}),
+                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         MS = [{
                                 #active_route{
                                     topic = Topic, 
                                     dest_type = DestType,
-                                    dest = Dest
+                                    dest = Dest,
+                                    method = Method
                                 },
                                 [],
                                 [true]
@@ -223,14 +227,16 @@ erlroute_messaging_test_() ->
                         % dest
                         DestType = process,
                         Dest = self(),
+                        Method = info,
 
                         EtsTable = erlroute:generate_routing_name(Module),
-                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest}),
+                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         MS = [{
                                 #active_route{
                                     topic = Topic, 
                                     dest_type = DestType,
-                                    dest = Dest
+                                    dest = Dest,
+                                    method = Method
                                 },
                                 [],
                                 [true]
@@ -246,14 +252,16 @@ erlroute_messaging_test_() ->
                         % dest
                         DestType = process,
                         Dest = self(),
+                        Method = info,
 
                         EtsTable = erlroute:generate_routing_name(Module),
-                        erlroute:sub([{module, Module}], {DestType, Dest}),
+                        erlroute:sub([{module, Module}], {DestType, Dest, Method}),
                         MS = [{
                                 #active_route{
                                     topic = Topic, 
                                     dest_type = DestType,
-                                    dest = Dest
+                                    dest = Dest,
+                                    method = Method
                                 },
                                 [],
                                 [true]
@@ -269,19 +277,21 @@ erlroute_messaging_test_() ->
                          % dest
                          DestType = process,
                          Dest = self(),
+                         Method = info,
                 
                          EtsTable = erlroute:generate_routing_name(Module),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          MS = [{
                                  #active_route{
                                      topic = Topic, 
                                      dest_type = DestType,
-                                     dest = Dest
+                                     dest = Dest,
+                                     method = Method
                                  },
                                  [],
                                  [true]

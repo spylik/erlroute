@@ -62,7 +62,7 @@ handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
     {reply, Result, State};
 
 handle_call({unsubscribe, FlowSource, FlowDest}, _From, State) ->
-    unsubscribe(FlowSource, FlowDest),
+%    unsubscribe(FlowSource, FlowDest),
     {reply, ok, State};
 
 handle_call(stop, _From, State) ->
@@ -81,7 +81,7 @@ handle_cast({subscribe, FlowSource, FlowDest}, State) ->
     {noreply, State};
 
 handle_cast({unsubscribe, FlowSource, FlowDest}, State) ->
-    unsubscribe(FlowSource,FlowDest),
+%    unsubscribe(FlowSource,FlowDest),
     {noreply, State};
 
 handle_cast(stop, State) ->
@@ -228,12 +228,13 @@ send([], _Message, Acc) -> Acc.
     FlowDest    :: flow_dest().
 
 % we don't want to crash gen_server process, so we validating data on caller side
-sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest}) when 
+sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when 
         is_atom(Module),
         is_binary(Topic),
         DestType =:= 'process' orelse DestType =:= 'poolboy',
-        is_pid(Dest) orelse is_atom(Dest) ->
-    gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest}});
+        is_pid(Dest) orelse is_atom(Dest),
+        Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' ->
+    gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
 % when FlowSource is_list 
 sub(FlowSource, FlowDest) when is_list(FlowSource) ->
@@ -252,24 +253,19 @@ sub(FlowSource, FlowDest) when is_list(FlowSource) ->
     FlowSource  ::  flow_source() | nonempty_list(),
     FlowDest    ::  flow_dest().
 
-subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest}) ->
+subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) ->
     case Module of
         undefined -> ok;  % temporary. need implement lookup_by_topic
         _ ->
             EtsName = generate_routing_name(Module),
             _ = route_table_must_present(EtsName),
-            ets:insert(EtsName, #active_route{topic=Topic, dest_type=DestType, dest=Dest})
+            ets:insert(EtsName, #active_route{topic=Topic, dest_type=DestType, dest=Dest, method=Method})
     end.
 
 
 % ================================ end of sub part =============================
 % ----------------------------------- unsub part -------------------------------
 
-unsubscribe(_FlowSource, _FlowDest) -> ok.
-
-%unsubscribe(Type, FlowSource, Topic, Dest, DestType) ->
-%    EtsName = generate_routing_name(Type, FlowSource),
-%    ets:match_delete(EtsName, #active_route{topic=Topic, dest=Dest, dest_type=DestType}).
 
 % ================================ end of sub part =============================
 

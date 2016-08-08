@@ -13,7 +13,7 @@ Actually, erlroute do simple job - it just send messages to... and "where" you c
 Sure, this behaviour also could be implemented with AMQP-broker.
 But with amqp-broker, you also going to deal with all amq protocol routine - open connection from producer, create channel, push message, open connection from subscriber, subscribe, pull message, etc. After all of this overheads you could have bad performance.
 
-Erlroute simple, fast and designed only for manage message routes inside your Erlang applications between Erlang processes.
+Erlroute designed to be low-weight, simple, fast and suitable only for manage message routes inside your Erlang applications between Erlang processes.
 
 == When erlroute useful for you and when not so?
 * Erlroute useful if you are going to design dynamically environment where one group of processes (listeners) in some cases may require data from other processes (producers) and in some another cases - do not.
@@ -51,8 +51,7 @@ Erlroute actually do same job as axons and dendrits. Some neuron generate and pr
 == Key feutures:
 
 * ets based;
-* very cheap sync 'erlroute:pub';
-* cache per producers modules (separate ets table for each producer module);
+* due per module cache call to 'erlroute:pub' is very cheap;
 * support pools as destinations;
 * parse transform for build ets-names during compile time.
 
@@ -102,7 +101,7 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 
 [source,erlang]
 ----
-% @doc Shortcut to `erlroute:sub(Source, {pid, self()})`.
+% @doc Shortcut to `erlroute:sub(Source, {pid, self(), info})`.
 
 -spec erlroute:sub(Source) -> ok
     when
@@ -118,8 +117,10 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 
 -spec erlroute:sub(Source,Dest) -> ok
     when
-        Source  ::  [{module, module()} | {topic, binary()}],
-        Dest    ::  {process, Proc} | {poolboy, atom()}.
+        Source  ::  [{module, module(), Method} | {topic, binary(), Method}],
+        Method  ::  'info' | 'cast' | 'call',
+        Dest    ::  {process, Proc} | {poolboy, atom()},
+        Proc    ::  pid() | atom().
 ----
 
 Examples of usage:

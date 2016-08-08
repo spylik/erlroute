@@ -18,6 +18,7 @@
 	}).
 
 -type proc() :: pid() | atom().
+-type method() :: 'info' | 'cast' | 'call'.
 
 -record(topics, {
         topic :: binary(),
@@ -27,11 +28,13 @@
         process :: proc()
     }).
 
--type flow_dest() :: {process, proc()} | {poolboy, atom()}.
-
 -record(flow_source, {
         module :: 'undefined' | module(),
         topic = <<"*">> :: binary()
     }).
 
 -type flow_source() :: #flow_source{}.
+
+-type flow_dest() :: {process, proc(), method()} | {poolboy, atom(), method()}.
+
+
