@@ -82,17 +82,18 @@ otp_test_() ->
         }
     }.
 
+
 % tests which doesn't require started erlroute as gen_server process
 erlroute_non_started_test_() ->
     {setup,
         fun cleanup/0,
         {inparallel,
             [
-                {<<"When erlroute doesn't start, ets-table msg_routes must be undefined">>, 
+                {<<"When erlroute doesn't start, ets-table '$erlroute_topics' must be undefined">>, 
                     fun() -> 
                         ?assertEqual(
                             undefined, 
-                            ets:info(msg_routes)
+                            ets:info('$erlroute_topics')
                         ) 
                     end},
         
@@ -158,10 +159,137 @@ erlroute_started_test_() ->
                            true, 
                            is_pid(whereis(?TESTSERVER))
                        ) 
-                   end}
+                   end},
+
+                {<<"When erlroute start, ets-table '$erlroute_topics' must be present">>, 
+                    fun() -> 
+                        ?assertNotEqual(
+                            undefined, 
+                            ets:info('$erlroute_topics')
+                        ) 
+                    end
+                }
+
             ]
         }
     }.
+
+% test pub_routine
+erlroute_msg_ack_test_() ->
+    {setup,
+        fun setup_start/0,
+        fun cleanup/1,
+        {inorder,
+            [
+                {<<"After pub we must have one record in topics ets">>, 
+                    fun() ->
+                        % source
+                        ?assertEqual(0, ets:info('$erlroute_topics', size)),
+                        Module = mlibs:random_atom(),
+                        SendTopic = <<"testtopic">>,
+                        Process = self(),
+                        Msg = make_ref(),
+                        erlroute:pub(Module, Process, ?LINE, SendTopic, Msg),
+                        timer:sleep(5),
+                        ?assertEqual(1, ets:info('$erlroute_topics', size))
+                    end},
+                {<<"After pub we must have two record in topics ets with right data">>, 
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        Topic = <<"testtopic">>,
+                        Process = self(),
+                        Msg = make_ref(),
+                        Line = 123,
+                        erlroute:pub(Module, Process, 123, Topic, Msg),
+                        timer:sleep(5),
+                        ?assertEqual(2, ets:info('$erlroute_topics', size)),
+                        MS = [{
+                                #topics{
+                                    topic = Topic, 
+                                    words = [<<"testtopic">>],
+                                    module = Module,
+                                    process = Process,
+                                    line = Line
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count('$erlroute_topics', MS))
+                    end},
+                {<<"When we pub message to same topic, we do not add anything">>, 
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        Topic = <<"testtopic">>,
+                        Process = self(),
+                        Msg = make_ref(),
+                        Line = 123,
+                        erlroute:pub(Module, Process, 123, Topic, Msg),
+                        timer:sleep(5),
+                        ?assertEqual(3, ets:info('$erlroute_topics', size)),
+                        MS = [{
+                                #topics{
+                                    topic = Topic, 
+                                    words = [<<"testtopic">>],
+                                    module = Module,
+                                    process = Process,
+                                    line = Line
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count('$erlroute_topics', MS)),
+                        erlroute:pub(Module, Process, 123, Topic, Msg),
+                        timer:sleep(5),
+                        ?assertEqual(1, ets:select_count('$erlroute_topics', MS))
+                    end},
+                {<<"When we pub message from another module, we must have 2 entry for topic and one if match by full">>, 
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        Topic = <<"testtopic2">>,
+                        Process = self(),
+                        Msg = make_ref(),
+                        Line = 123,
+                        erlroute:pub(Module, Process, 123, Topic, Msg),
+                        timer:sleep(5),
+                        ?assertEqual(4, ets:info('$erlroute_topics', size)),
+                        MS1 = [{
+                                #topics{
+                                    topic = Topic, 
+                                    words = [<<"testtopic2">>],
+                                    process = Process,
+                                    line = Line,
+                                    _ = '_'
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count('$erlroute_topics', MS1)),
+                        Module2 = mlibs:random_atom(),
+
+                        erlroute:pub(Module2, Process, 123, Topic, Msg),
+                        timer:sleep(5),
+                        ?assertEqual(2, ets:select_count('$erlroute_topics', MS1)),
+                        MSFull = [{
+                                #topics{
+                                    topic = Topic, 
+                                    module = Module,
+                                    words = [<<"testtopic2">>],
+                                    process = Process,
+                                    line = Line
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count('$erlroute_topics', MSFull))
+
+                    end}
+            ]
+        }
+    }.
+
 
 erlroute_simple_defined_module_full_topic_messaging_test_() ->
     {setup,
@@ -178,7 +306,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         DestType = process,
                         Dest = self(),
                         Method = info,
-
+ 
                         EtsTable = erlroute:generate_routing_name(Module),
                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                         MS = [{
@@ -186,7 +314,10 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    is_final_topic = true,
+                                    parent_topic = undefined,
+                                    words = undefined
                                 },
                                 [],
                                 [true]
@@ -202,7 +333,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         DestType = process,
                         Dest = self(),
                         Method = info,
-
+ 
                         EtsTable = erlroute:generate_routing_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         MS = [{
@@ -210,14 +341,17 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    is_final_topic = true,
+                                    parent_topic = undefined,
+                                    words = undefined
                                 },
                                 [],
                                 [true]
                             }],
                         ?assertEqual(1, ets:select_count(EtsTable, MS))
                     end},
-
+ 
                 {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>, 
                     fun() ->
                         % source 
@@ -227,22 +361,26 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         DestType = process,
                         Dest = self(),
                         Method = info,
-
+ 
                         EtsTable = erlroute:generate_routing_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
+                        timer:sleep(5),
                         MS = [{
                                 #active_route{
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    is_final_topic = true,
+                                    parent_topic = undefined,
+                                    words = undefined
                                 },
                                 [],
                                 [true]
                             }],
                         ?assertEqual(1, ets:select_count(EtsTable, MS))
                     end},
-
+ 
                 {<<"After sub/2 without topic it should subscribe to <<\"*\">>">>, 
                     fun() ->
                         % source 
@@ -252,15 +390,19 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         DestType = process,
                         Dest = self(),
                         Method = info,
-
+ 
                         EtsTable = erlroute:generate_routing_name(Module),
                         erlroute:sub([{module, Module}], {DestType, Dest, Method}),
+                        timer:sleep(5),
                         MS = [{
                                 #active_route{
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    is_final_topic = true,
+                                    parent_topic = undefined,
+                                    words = undefined
                                 },
                                 [],
                                 [true]
@@ -285,17 +427,49 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+                         timer:sleep(5),
                          MS = [{
                                  #active_route{
                                      topic = Topic, 
                                      dest_type = DestType,
                                      dest = Dest,
-                                     method = Method
+                                     method = Method,
+                                     is_final_topic = true,
+                                     parent_topic = undefined,
+                                     words = undefined
                                  },
                                  [],
                                  [true]
                              }],
                          ?assertEqual(1, ets:select_count(EtsTable, MS))
+                    end},
+                {<<"After sub/2 with full parameters and topic <<\"testtopic.*.test1.test3\">>, ets tables must present and route entry must present in ets">>, 
+                    fun() ->
+                        % source 
+                        Module = mlibs:random_atom(),
+                        Topic = <<"testtopic.*.test1.test3">>,
+                        % dest
+                        DestType = process,
+                        Dest = self(),
+                        Method = info,
+
+                        EtsTable = erlroute:generate_routing_name(Module),
+                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
+                        timer:sleep(5),
+                        MS = [{
+                                #active_route{
+                                    topic = Topic, 
+                                    dest_type = DestType,
+                                    dest = Dest,
+                                    method = Method,
+                                    is_final_topic = false,
+                                    parent_topic = 'undefined',
+                                    words = [<<"testtopic">>,<<"*">>,<<"test1">>,<<"test3">>]
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count(EtsTable, MS))
                     end},
                 {<<"Erlroute able to deliver message to single subscriber with exactly the same topic">>,
                     fun() ->
@@ -386,7 +560,6 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         ?assertEqual([Msg2, Msg1], Ack),
                         Dest ! stop
                 end}
-
 %       
 %                {<<"After sync unsub/6, ets table must do not contain route entry">>,
 %                    fun() ->
@@ -550,6 +723,12 @@ parse_transform_tes() ->
         }
     }.
 
+split_topic_key_test() ->
+    ?assertEqual([<<"*">>], erlroute:split_topic_key(<<"*">>)),
+    ?assertEqual([<<"test1">>,<<"test2">>], erlroute:split_topic_key(<<"test1.test2">>)),
+    ?assertEqual([<<"test1">>,<<"!">>,<<"test2">>], erlroute:split_topic_key(<<"test1.!.test2">>)),
+    ?assertEqual([<<"test1">>,<<"*">>,<<"test2">>], erlroute:split_topic_key(<<"test1.*.test2">>)).
+
 setup_start() -> 
     disable_output(),
     start_server().
@@ -560,6 +739,7 @@ disable_output() ->
 cleanup() -> cleanup(true).
 
 cleanup(_) -> 
-    application:stop(erlroute).
+    application:stop(erlroute),
+    ok.
 
 start_server() -> application:ensure_started(?TESTSERVER).

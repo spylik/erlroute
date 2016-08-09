@@ -26,7 +26,8 @@
         pub/5,
         full_async_pub/5,
         full_sync_pub/5,
-        sub/2
+        sub/2,
+        test_split/0
     ]).
 
 % we will use ?MODULE as servername
@@ -49,7 +50,7 @@ stop(async) ->
 -spec init([]) -> {ok, undefined}.
 
 init([]) ->
-    _ = ets:new(topics, [
+    _ = ets:new('$erlroute_topics', [
             bag,
             protected,
             {keypos, #topics.topic},
@@ -80,20 +81,28 @@ handle_call(Msg, _From, State) ->
 
 handle_cast({new_msg, Module, Process, Line, Topic, _Message, EtsName, _WhoGetWhileSync}, State) ->
     TopicsKey = split_topic_key(Topic),
-    ets:insert(topics, #topics{
+    ets:insert('$erlroute_topics', #topics{
             topic = Topic, 
             words = TopicsKey,
             module = Module,
             line = Line,
             process = Process
         }),
-    MS = [{#active_route{is_final_topic = true, _ = '_'},
-            [], 
-            ['$_']
-        }],
-    lists:map(fun(#active_route{topic = Top, words = Words}) ->
-        ?debug("Topic is ~p, Words is ~p",[Top, Words])
-        end, ets:select(EtsName, MS)),
+    EtsSize = ets:info(EtsName, size),
+    case ets:info(EtsName, size) of
+        undefined -> ok;
+        _ ->
+            MS = [{#active_route{is_final_topic = false, _ = '_'},
+                    [], 
+                    ['$_']
+                }],
+            lists:map(
+                fun(#active_route{topic = Top, words = Words}) ->
+                    ?debug("Topic is ~p, Words is ~p",[Top, Words])
+                end, 
+                ets:select(EtsName, MS)
+            )
+    end,
     {noreply, State};
 
 handle_cast({subscribe, FlowSource, FlowDest}, State) ->
@@ -243,6 +252,11 @@ send([], _Message, Acc) -> Acc.
 % For the process subscribed by pid or registered name it just send message.
 % For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
 
+-spec sub(FlowSource) -> ok when
+    FlowSource  :: flow_source() | nonempty_list().
+
+sub(FlowSource) -> sub(FlowSource, {process, self(), info}).
+
 -spec sub(FlowSource,FlowDest) -> ok when
     FlowSource  :: flow_source() | nonempty_list(),
     FlowDest    :: flow_dest().
@@ -284,7 +298,10 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
             EtsName = generate_routing_name(Module),
             _ = route_table_must_present(EtsName),
             {IsFinal, Words} = is_final_topic(Topic),
-            ets:insert(EtsName, #active_route{topic=Topic, dest_type=DestType, dest=Dest, method=Method, is_final_topic=IsFinal,words=Words})
+%            ?debug("topic ~p is final ~p, words: ~p",[Topic,IsFinal, Words]),
+            ets:insert(EtsName, #active_route{topic=Topic, dest_type=DestType, dest=Dest, method=Method, is_final_topic=IsFinal, words=Words})
+%            Tab2List = ets:tab2list(EtsName),
+%            ?debug("tab2list ~p",[Tab2List])
     end.
 
 
@@ -323,7 +340,8 @@ route_table_must_present(EtsName) ->
 
 -spec is_final_topic(Topic) -> Result when
     Topic :: topic(),
-    Result :: {boolean(), nonempty_list()}.
+    Result :: {boolean(), Words},
+    Words :: 'undefined' | nonempty_list().
 
 is_final_topic(<<"*">>) -> {true, undefined};
 is_final_topic(Topic) ->
@@ -338,4 +356,53 @@ is_final_topic(Topic) ->
     Result :: nonempty_list().
 
 split_topic_key(Key) ->
-    binary:split(Key, <<".">>).
+    split_topic_key(Key, [], []).
+split_topic_key(<<>>, [], []) ->
+    [];
+split_topic_key(<<>>, RevWordAcc, RevResAcc) ->
+    lists:reverse([lists:reverse(RevWordAcc) | RevResAcc]);
+split_topic_key(<<$., Rest/binary>>, RevWordAcc, RevResAcc) ->
+    split_topic_key(Rest, [], [lists:reverse(RevWordAcc) | RevResAcc]);
+split_topic_key(<<C:8, Rest/binary>>, RevWordAcc, RevResAcc) ->
+    split_topic_key(Rest, [C | RevWordAcc], RevResAcc).
+
+
+
+split_topic_key2(Key) ->
+    split_topic_key2(Key, [], []).
+split_topic_key2(<<>>, [], []) ->
+    [];
+split_topic_key2(<<>>, RevWordAcc, RevResAcc) ->
+    lists:reverse([lists:reverse(RevWordAcc) | RevResAcc]);
+split_topic_key2(<<$.:1, Rest/binary>>, RevWordAcc, RevResAcc) ->
+    split_topic_key2(Rest, [], [lists:reverse(RevWordAcc) | RevResAcc]);
+split_topic_key2(<<C:8, Rest/binary>>, RevWordAcc, RevResAcc) ->
+    split_topic_key2(Rest, [C | RevWordAcc], RevResAcc).
+
+
+
+split(Bin) ->	
+    split(Bin, <<>>, []).
+split({<<>>, <<>>}, Result) ->
+    lists:reverse(Result);
+split(<<>>, Wa, Result) ->
+    lists:reverse([Wa|Result]);
+split(<<$.:1, Rs/binary>>, <<>>, Result) ->
+    split(Rs, <<>>, Result);
+split(<<$.:1, Rs/binary>>, Wa, Result) ->
+    split(Rs, <<>>, [Wa|Result]);
+split(<<Data:8, Rs/binary>>, Wa, Result) ->
+    split(Rs, <<Wa/binary, Data>>, Result).
+
+test_split() ->
+    [{our, test_our()}, {rmq, test_rmq()}, {rmq2, test_rmq2()}].
+
+test_rmq() ->
+    {Time, [<<"test">>,<<"*">>,<<"test1">>,<<"test2">>]} = timer:tc(fun() -> [split_topic_key(<<"test.*.test1,test2">>) || _ <- lists:seq(1,100000)], split_topic_key(<<"test.*.test1,test2">>) end),
+    Time.
+test_rmq2() ->
+    {Time, [<<"test">>,<<"*">>,<<"test1">>,<<"test2">>]} = timer:tc(fun() -> [split_topic_key2(<<"test.*.test1,test2">>) || _ <- lists:seq(1,100000)], split_topic_key2(<<"test.*.test1,test2">>) end),
+    Time.
+test_our() ->
+    {Time, [<<"test">>,<<"*">>,<<"test1">>,<<"test2">>]} = timer:tc(fun() -> [split(<<"test.*.test1,test2">>) || _ <- lists:seq(1,100000)], split(<<"test.*.test1,test2">>) end),
+    Time.
