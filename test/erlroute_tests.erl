@@ -207,7 +207,7 @@ erlroute_msg_ack_test_() ->
                         MS = [{
                                 #topics{
                                     topic = Topic, 
-                                    words = [<<"testtopic">>],
+                                    words = ["testtopic"],
                                     module = Module,
                                     process = Process,
                                     line = Line
@@ -231,7 +231,7 @@ erlroute_msg_ack_test_() ->
                         MS = [{
                                 #topics{
                                     topic = Topic, 
-                                    words = [<<"testtopic">>],
+                                    words = ["testtopic"],
                                     module = Module,
                                     process = Process,
                                     line = Line
@@ -258,7 +258,7 @@ erlroute_msg_ack_test_() ->
                         MS1 = [{
                                 #topics{
                                     topic = Topic, 
-                                    words = [<<"testtopic2">>],
+                                    words = ["testtopic2"],
                                     process = Process,
                                     line = Line,
                                     _ = '_'
@@ -276,7 +276,7 @@ erlroute_msg_ack_test_() ->
                                 #topics{
                                     topic = Topic, 
                                     module = Module,
-                                    words = [<<"testtopic2">>],
+                                    words = ["testtopic2"],
                                     process = Process,
                                     line = Line
                                 },
@@ -464,7 +464,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     method = Method,
                                     is_final_topic = false,
                                     parent_topic = 'undefined',
-                                    words = [<<"testtopic">>,<<"*">>,<<"test1">>,<<"test3">>]
+                                    words = ["testtopic","*","test1","test3"]
                                 },
                                 [],
                                 [true]
@@ -723,11 +723,13 @@ parse_transform_tes() ->
         }
     }.
 
-split_topic_key_test() ->
-    ?assertEqual([<<"*">>], erlroute:split_topic_key(<<"*">>)),
-    ?assertEqual([<<"test1">>,<<"test2">>], erlroute:split_topic_key(<<"test1.test2">>)),
-    ?assertEqual([<<"test1">>,<<"!">>,<<"test2">>], erlroute:split_topic_key(<<"test1.!.test2">>)),
-    ?assertEqual([<<"test1">>,<<"*">>,<<"test2">>], erlroute:split_topic_key(<<"test1.*.test2">>)).
+split_topic_test() ->
+    ?assertEqual(["*"], erlroute:split_topic(<<"*">>)),
+    ?assertEqual(["test1","test2"], erlroute:split_topic(<<"test1.test2">>)),
+    ?assertEqual(["test1","!","test2"], erlroute:split_topic(<<"test1.!.test2">>)),
+    ?assertEqual(["test1","*","test2"], erlroute:split_topic(<<"test1.*.test2">>)),
+    ?assertEqual(["test1","*"], erlroute:split_topic(<<"test1.*">>)),
+    ?assertEqual(["*","test1"], erlroute:split_topic(<<"*.test1">>)).
 
 setup_start() -> 
     disable_output(),

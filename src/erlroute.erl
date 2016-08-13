@@ -12,6 +12,7 @@
 
 -include("erlroute.hrl").
 -include("deps/teaser/include/utils.hrl").
+
 % gen server is here
 -behaviour(gen_server).
 
@@ -27,7 +28,7 @@
         full_async_pub/5,
         full_sync_pub/5,
         sub/2,
-        test_split/0
+        sub/1
     ]).
 
 % we will use ?MODULE as servername
@@ -80,7 +81,7 @@ handle_call(Msg, _From, State) ->
 %--------------handle_cast-----------------
 
 handle_cast({new_msg, Module, Process, Line, Topic, _Message, EtsName, _WhoGetWhileSync}, State) ->
-    TopicsKey = split_topic_key(Topic),
+    TopicsKey = split_topic(Topic),
     ets:insert('$erlroute_topics', #topics{
             topic = Topic, 
             words = TopicsKey,
@@ -88,7 +89,7 @@ handle_cast({new_msg, Module, Process, Line, Topic, _Message, EtsName, _WhoGetWh
             line = Line,
             process = Process
         }),
-    EtsSize = ets:info(EtsName, size),
+%    EtsSize = ets:info(EtsName, size),
     case ets:info(EtsName, size) of
         undefined -> ok;
         _ ->
@@ -347,62 +348,20 @@ is_final_topic(<<"*">>) -> {true, undefined};
 is_final_topic(Topic) ->
     case binary:match(Topic, [<<"*">>,<<"!">>]) of
         nomatch -> {true, undefined};
-        _ -> {false, split_topic_key(Topic)}
+        _ -> {false, split_topic(Topic)}
     end.
     
 % @doc split binary topic to the list
--spec split_topic_key(Key) -> Result when
+-spec split_topic(Key) -> Result when
     Key :: binary(),
     Result :: nonempty_list().
 
-split_topic_key(Key) ->
-    split_topic_key(Key, [], []).
-split_topic_key(<<>>, [], []) ->
-    [];
-split_topic_key(<<>>, RevWordAcc, RevResAcc) ->
-    lists:reverse([lists:reverse(RevWordAcc) | RevResAcc]);
-split_topic_key(<<$., Rest/binary>>, RevWordAcc, RevResAcc) ->
-    split_topic_key(Rest, [], [lists:reverse(RevWordAcc) | RevResAcc]);
-split_topic_key(<<C:8, Rest/binary>>, RevWordAcc, RevResAcc) ->
-    split_topic_key(Rest, [C | RevWordAcc], RevResAcc).
-
-
-
-split_topic_key2(Key) ->
-    split_topic_key2(Key, [], []).
-split_topic_key2(<<>>, [], []) ->
-    [];
-split_topic_key2(<<>>, RevWordAcc, RevResAcc) ->
-    lists:reverse([lists:reverse(RevWordAcc) | RevResAcc]);
-split_topic_key2(<<$.:1, Rest/binary>>, RevWordAcc, RevResAcc) ->
-    split_topic_key2(Rest, [], [lists:reverse(RevWordAcc) | RevResAcc]);
-split_topic_key2(<<C:8, Rest/binary>>, RevWordAcc, RevResAcc) ->
-    split_topic_key2(Rest, [C | RevWordAcc], RevResAcc).
-
-
-
-split(Bin) ->	
-    split(Bin, <<>>, []).
-split({<<>>, <<>>}, Result) ->
-    lists:reverse(Result);
-split(<<>>, Wa, Result) ->
-    lists:reverse([Wa|Result]);
-split(<<$.:1, Rs/binary>>, <<>>, Result) ->
-    split(Rs, <<>>, Result);
-split(<<$.:1, Rs/binary>>, Wa, Result) ->
-    split(Rs, <<>>, [Wa|Result]);
-split(<<Data:8, Rs/binary>>, Wa, Result) ->
-    split(Rs, <<Wa/binary, Data>>, Result).
-
-test_split() ->
-    [{our, test_our()}, {rmq, test_rmq()}, {rmq2, test_rmq2()}].
-
-test_rmq() ->
-    {Time, [<<"test">>,<<"*">>,<<"test1">>,<<"test2">>]} = timer:tc(fun() -> [split_topic_key(<<"test.*.test1,test2">>) || _ <- lists:seq(1,100000)], split_topic_key(<<"test.*.test1,test2">>) end),
-    Time.
-test_rmq2() ->
-    {Time, [<<"test">>,<<"*">>,<<"test1">>,<<"test2">>]} = timer:tc(fun() -> [split_topic_key2(<<"test.*.test1,test2">>) || _ <- lists:seq(1,100000)], split_topic_key2(<<"test.*.test1,test2">>) end),
-    Time.
-test_our() ->
-    {Time, [<<"test">>,<<"*">>,<<"test1">>,<<"test2">>]} = timer:tc(fun() -> [split(<<"test.*.test1,test2">>) || _ <- lists:seq(1,100000)], split(<<"test.*.test1,test2">>) end),
-    Time.
+split_topic(Bin) ->	
+    split_topic(Bin, [], []).
+split_topic(<<>>, WAcc, Result) ->
+    lists:reverse([lists:reverse(WAcc)|Result]);
+split_topic(<<2#00101110:8, Rest/binary>>, WAcc, Result) ->
+    split_topic(Rest, [], [lists:reverse(WAcc)|Result]);
+split_topic(<<Char:8, Rest/binary>>, WAcc, Result) ->
+    split_topic(Rest, [Char|WAcc], Result);
+split_topic(<<>>, [], []) -> [].
