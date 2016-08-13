@@ -105,12 +105,12 @@ erlroute_non_started_test_() ->
                         )
                     end},
         
-                {<<"generate_routing_name must generate correct ets table name when Type is by_module_name">>,
+                {<<"generate_complete_routing_name must generate correct ets table name when Type is by_module_name">>,
                     fun() ->
                         Source = test_producer,
                         ?assertEqual(
-                            erlroute:generate_routing_name(Source), 
-                            '$erlroute_test_producer'
+                            erlroute:generate_complete_routing_name(Source), 
+                            '$erlroute_cmp_test_producer'
                         )
                     end}
             ]
@@ -307,17 +307,15 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
  
-                        EtsTable = erlroute:generate_routing_name(Module),
+                        EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                         MS = [{
-                                #active_route{
+                                #complete_routes{
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
                                     method = Method,
-                                    is_final_topic = true,
-                                    parent_topic = undefined,
-                                    words = undefined
+                                    parent_topic = undefined
                                 },
                                 [],
                                 [true]
@@ -334,17 +332,15 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
  
-                        EtsTable = erlroute:generate_routing_name(Module),
+                        EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         MS = [{
-                                #active_route{
+                                #complete_routes{
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
                                     method = Method,
-                                    is_final_topic = true,
-                                    parent_topic = undefined,
-                                    words = undefined
+                                    parent_topic = undefined
                                 },
                                 [],
                                 [true]
@@ -362,18 +358,16 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
  
-                        EtsTable = erlroute:generate_routing_name(Module),
+                        EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
-                                #active_route{
+                                #complete_routes{
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
                                     method = Method,
-                                    is_final_topic = true,
-                                    parent_topic = undefined,
-                                    words = undefined
+                                    parent_topic = undefined
                                 },
                                 [],
                                 [true]
@@ -391,18 +385,16 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
  
-                        EtsTable = erlroute:generate_routing_name(Module),
+                        EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{module, Module}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
-                                #active_route{
+                                #complete_routes{
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
                                     method = Method,
-                                    is_final_topic = true,
-                                    parent_topic = undefined,
-                                    words = undefined
+                                    parent_topic = undefined
                                 },
                                 [],
                                 [true]
@@ -420,7 +412,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                          Dest = self(),
                          Method = info,
                 
-                         EtsTable = erlroute:generate_routing_name(Module),
+                         EtsTable = erlroute:generate_complete_routing_name(Module),
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
@@ -429,14 +421,12 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          timer:sleep(5),
                          MS = [{
-                                 #active_route{
+                                 #complete_routes{
                                      topic = Topic, 
                                      dest_type = DestType,
                                      dest = Dest,
                                      method = Method,
-                                     is_final_topic = true,
-                                     parent_topic = undefined,
-                                     words = undefined
+                                     parent_topic = undefined
                                  },
                                  [],
                                  [true]
@@ -453,17 +443,15 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_routing_name(Module),
+                        EtsTable = erlroute:generate_parametrized_routing_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
-                                #active_route{
+                                #parametrize_routes{
                                     topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
                                     method = Method,
-                                    is_final_topic = false,
-                                    parent_topic = 'undefined',
                                     words = ["testtopic","*","test1","test3"]
                                 },
                                 [],
@@ -568,9 +556,9 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                        Topic = <<"*">>,
 %                        Dest = self(),
 %                        DestType = pid,
-%                        EtsTable = erlroute:generate_routing_name(Type, Source),
+%                        EtsTable = erlroute:generate_complete_routing_name(Type, Source),
 %                        MS = [{
-%                                #active_route{
+%                                #complete_routes{
 %                                    topic = Topic, 
 %                                    dest = Dest, 
 %                                    dest_type = DestType
@@ -592,9 +580,9 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       Topic = <<"*">>,
 %                       Dest = self(),
 %                       DestType = pid,
-%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
 %                       MS = [{
-%                               #active_route{
+%                               #complete_routes{
 %                                   topic = Topic, 
 %                                   dest = Dest, 
 %                                   dest_type = DestType
@@ -617,9 +605,9 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       Topic = <<"*">>,
 %                       Dest = self(),
 %                       DestType = pid,
-%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
 %                       MS = [{
-%                               #active_route{
+%                               #complete_routes{
 %                                   topic = Topic, 
 %                                   dest = Dest, 
 %                                   dest_type = DestType
@@ -642,9 +630,9 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       Topic = <<"*">>,
 %                       Dest = self(),
 %                       DestType = pid,
-%                       EtsTable = erlroute:generate_routing_name(Type, Source),
+%                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
 %                       MS = [{
-%                               #active_route{
+%                               #complete_routes{
 %                                   topic = Topic, 
 %                                   dest = Dest, 
 %                                   dest_type = DestType

@@ -14,20 +14,32 @@
 -type proc() :: pid() | atom().
 -type method() :: 'info' | 'cast' | 'call'.
 -type id() :: {neg_integer(), pos_integer()}.
+-type etsname() :: atom().
 
--record(active_route, {
+% only for cache for final topics (generated with module name)
+-record(complete_routes, {
         topic :: topic(),
         dest_type :: 'pid' | 'poolboy_pool',
         dest :: atom(),
         method = 'info' ::'call' | 'cast' | 'info',
-        is_final_topic = true :: boolean(),
-        parent_topic = 'undefined' :: 'undefined' | binary(),
-        words = 'undefined' :: 'undefined' | nonempty_list()
+        parent_topic = 'undefined' :: 'undefined' | {etsname(), binary()}
 	}).
 
+% only for parametrize routes (generated with module name)
+-record(parametrize_routes, {
+        topic :: topic(),
+        dest_type :: 'pid' | 'poolboy_pool',
+        dest :: atom(),
+        method = 'info' ::'call' | 'cast' | 'info',
+        words :: nonempty_list()
+	}).
+
+% for non-module specific subscribes
 -record(subscribers_by_topic_only, {
         topic :: topic(),
-        topic_words :: nonempty_list(),
+        is_final_topic = true :: boolean(),
+        words = 'undefined' :: 'undefined' | nonempty_list(),
+
         module :: 'undefined' | module(),
         dest_type :: 'pid' | 'poolboy_pool',
         dest :: atom(),
