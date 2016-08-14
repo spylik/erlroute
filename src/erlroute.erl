@@ -266,7 +266,7 @@ send([], _Message, Acc) -> Acc.
 sub(FlowSource) -> sub(FlowSource, {process, self(), info}).
 
 -spec sub(FlowSource,FlowDest) -> ok when
-    FlowSource  :: flow_source() | nonempty_list(),
+    FlowSource  :: flow_source() | [{module, module()} | {topic, binary()}],
     FlowDest    :: flow_dest().
 
 % we don't want to crash gen_server process, so we validating data on caller side

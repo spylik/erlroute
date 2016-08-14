@@ -101,11 +101,11 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 
 [source,erlang]
 ----
-% @doc Shortcut to `erlroute:sub(Source, {pid, self(), info})`.
+% @doc Shortcut to `erlroute:sub(Source, {process, self(), info})`.
 
 -spec erlroute:sub(Source) -> ok
     when
-        Source  ::  [{module, module()} | {topic, binary()}].
+        Source  :: [{topic, binary()}, {module, module}].
 ----
 
 [source,erlang]
@@ -115,61 +115,38 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 % For the process subscribed by pid or registered name it just send message. 
 % For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
 
--spec erlroute:sub(Source,Dest) -> ok
+-spec erlroute:sub(Source,Destination) -> ok
     when
-        Source  ::  [{module, module(), Method} | {topic, binary(), Method}],
-        Method  ::  'info' | 'cast' | 'call',
-        Dest    ::  {process, Proc} | {poolboy, atom()},
-        Proc    ::  pid() | atom().
+        Source   	::	[{topic, binary()}, {module, module}],
+        Destination ::  {DestType, Dest, Method},
+		DestType    ::  'process' | 'poolboy',
+		Dest		::	pid() | atom(),
+        Method		::  'info' | 'cast' | 'call'.
 ----
 
 Examples of usage:
 [source,erlang]
 ----
 % Subscribe process with pid <0.39.0> to
-% all messages produced by module testmodule. Any topic, any processID.
+% all messages produced by module testmodule. Any topic.
 
-erlroute:sub([{module, testmodule}], {process, <0.39.0>});
+erlroute:sub([{module, testmodule}], {process, <0.39.0>, info});
 ----
 
 [source,erlang]
 ----
-% Subscribe poolboy pool with name `poolname` to
-% all messages produced by process registered as `testregisteredprocess`. Any topic, any module.
-
-erlroute:sub([{process, testregisteredprocess}], {poolboy, poolname});
-----
-
-[source,erlang]
-----
-% Subscribe process with registered name `testprocess` to 
-% all messages produced by process with pid `<0.38.0>`. Any topic, any module.
-
-erlroute:sub([{process, <0.38.0>}, {process, testprocess}]);
-----
-
-[source,erlang]
-----
-% Subscribe current process to 
-% all messages with topic \<<"testtopic">>. Any module, any processID.
+% Subscribe current process to
+% all messages with topic <<"testtopic">> produced by any module.
 
 erlroute:sub([{topic, <<"testtopic">>}]);
 ----
 
 [source,erlang]
 ----
-% Subscribe current process to 
-% all messages with topic \<<"testtopic">> produced by module `testmodule`. Any processID.
+% Subscribe poolboy pool with name `poolname` to
+% all messages with topic <<"megatesttopic">> only from module testmodule.
 
-erlroute:sub([{module, testmodule}, {topic, <<"testtopic">>}]);
-----
-
-[source,erlang]
-----
-% Subscribe poolboy pool with name `pool1` to 
-% all messages with topic \<<"testtopic">> produced by module `testmodule`.
-
-erlroute:sub([{module, testmodule}, {topic, <<"testtopic">>}], {poolboy, pool1});
+erlroute:sub([{module, testmodule}, {topic, <<"megatesttopic">>}], {poolboy, poolname});
 ----
 
 === Misc
