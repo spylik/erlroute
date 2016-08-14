@@ -96,11 +96,11 @@ erlroute_non_started_test_() ->
                             ets:info('$erlroute_topics')
                         ) 
                     end},
-                 {<<"When erlroute doesn't start, ets-table '$erlroute_subscribers_by_topic_only' must be undefined">>, 
+                 {<<"When erlroute doesn't start, ets-table '$erlroute_global_sub' must be undefined">>, 
                     fun() -> 
                         ?assertEqual(
                             undefined, 
-                            ets:info('$erlroute_subscribers_by_topic_only')
+                            ets:info('$erlroute_global_sub')
                         ) 
                     end},
                 {<<"When erlroute doesn't start, process erlroute must be unregistered">>, 
@@ -175,11 +175,11 @@ erlroute_started_test_() ->
                         ) 
                     end
                 },
-                {<<"When erlroute start, ets-table '$erlroute_subscribers_by_topic_only' must be present">>, 
+                {<<"When erlroute start, ets-table '$erlroute_global_sub' must be present">>, 
                     fun() -> 
                         ?assertNotEqual(
                             undefined, 
-                            ets:info('$erlroute_subscribers_by_topic_only')
+                            ets:info('$erlroute_global_sub')
                         ) 
                     end
                 }
@@ -562,7 +562,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         ?assertEqual([Msg2, Msg1], Ack),
                         Dest ! stop
                 end},
-                {<<"Should have entry in ets '$erlroute_subscribers_by_topic_only' after subscribe to specified topic globally">>, 
+                {<<"Should have entry in ets '$erlroute_global_sub' after subscribe to specified topic globally">>, 
                     fun() ->
                         % source 
                         Topic = <<"testmegatopic">>,
@@ -585,7 +585,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                 [],
                                 [true]
                             }],
-                        ?assertEqual(1, ets:select_count('$erlroute_subscribers_by_topic_only', MS))
+                        ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS))
                 end},
                 {<<"Global subscribe to specified topic and then pub test">>, 
                     fun() ->
@@ -614,7 +614,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                 [],
                                 [true]
                             }],
-                        ?assertEqual(1, ets:select_count('$erlroute_subscribers_by_topic_only', MS)),
+                        ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS)),
 
                         EtsName = erlroute:generate_complete_routing_name(Module),
 
@@ -672,7 +672,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                 [],
                                 [true]
                             }],
-                        ?assertEqual(1, ets:select_count('$erlroute_subscribers_by_topic_only', MS)),
+                        ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS)),
                         
                         % must present here
                         ?assertNotEqual(undefined,ets:info(EtsName)),

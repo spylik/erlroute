@@ -58,7 +58,7 @@ init([]) ->
             {keypos, #topics.topic},
             named_table
         ]),
-    _ = ets:new('$erlroute_subscribers_by_topic_only', [
+    _ = ets:new('$erlroute_global_sub', [
             bag,
             protected,
             {read_concurrency, true}, % todo: test doesrt affect performance for writes?
@@ -302,7 +302,7 @@ sub(FlowSource, FlowDest) when is_list(FlowSource) ->
 % @doc subscribe with undefined module
 subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Method}) ->
     {IsFinal, Words} = is_final_topic(Topic),
-    ets:insert('$erlroute_subscribers_by_topic_only', #subscribers_by_topic_only{
+    ets:insert('$erlroute_global_sub', #subscribers_by_topic_only{
         topic = Topic,
         is_final_topic = IsFinal,
         words = Words,
@@ -319,7 +319,7 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
                         dest_type = DestType, 
                         dest = Dest, 
                         method = Method,
-                        parent_topic = {'$erlroute_subscribers_by_topic_only', Topic}
+                        parent_topic = {'$erlroute_global_sub', Topic}
                     }
                 )
             end, ets:lookup('$erlroute_topics',Topic));
@@ -374,7 +374,7 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
                         dest_type = DestType, 
                         dest = Dest,
                         method = Method,
-                        parent_topic = {'$erlroute_subscribers_by_topic_only', Topic}
+                        parent_topic = {'$erlroute_global_sub', Topic}
                     },
                     Toreturn = send([ToInsert], Message, []),
                     ets:insert(route_table_must_present(EtsName), ToInsert),
@@ -382,7 +382,7 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
                 true ->
                     []
             end
-        end, ets:lookup('$erlroute_subscribers_by_topic_only', Topic)
+        end, ets:lookup('$erlroute_global_sub', Topic)
     )).
 
 
