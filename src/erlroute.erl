@@ -313,15 +313,17 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
     _ = case IsFinal of
         true ->
             lists:map(fun(#topics{module = Module}) ->
-                ets:insert(generate_complete_routing_name(Module), #complete_routes{
-                    topic = Topic, 
-                    dest_type = DestType, 
-                    dest = Dest, 
-                    method = Method,
-                    parent_topic = {'$erlroute_subscribers_by_topic_only', Topic}
-                })
+                ets:insert(route_table_must_present(generate_complete_routing_name(Module)), 
+                    #complete_routes{
+                        topic = Topic, 
+                        dest_type = DestType, 
+                        dest = Dest, 
+                        method = Method,
+                        parent_topic = {'$erlroute_subscribers_by_topic_only', Topic}
+                    }
+                )
             end, ets:lookup('$erlroute_topics',Topic));
-        false -> todo % todo
+        false -> todo % implement for parametrized topics
     end,
     ok; 
 
