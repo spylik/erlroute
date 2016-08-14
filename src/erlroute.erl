@@ -54,9 +54,18 @@ init([]) ->
     _ = ets:new('$erlroute_topics', [
             bag,
             protected,
+            {read_concurrency, true}, % todo: test does it affect performance for writes?
             {keypos, #topics.topic},
             named_table
         ]),
+    _ = ets:new('$erlroute_subscribers_by_topic_only', [
+            bag,
+            protected,
+            {read_concurrency, true}, % todo: test doesrt affect performance for writes?
+            {keypos, #subscribers_by_topic_only.topic},
+            named_table
+        ]),
+
     {ok, undefined}.
 
 %--------------handle_call-----------------
@@ -81,7 +90,7 @@ handle_call(Msg, _From, State) ->
 %--------------handle_cast-----------------
 
 handle_cast({new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}, State) ->
-    _ = post_cache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync),
+    _ = post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync),
     {noreply, State};
 
 handle_cast({subscribe, FlowSource, FlowDest}, State) ->
@@ -118,7 +127,7 @@ code_change(_OldVsn, State, _Extra) ->
 % ============================= end of gen_server part =========================
 % ----------------------------------- pub part ---------------------------------
 
-% @doc Publish message. Default is hybrid behaviour:
+% @doc Publish message API. Default is hybrid behaviour:
 % - check if route table existing (cache per module)
 % - for cached routes it send message async
 % - at the end it cast to erlroute and erlroute try to match not yet cached routes
@@ -136,8 +145,7 @@ code_change(_OldVsn, State, _Extra) ->
 % To use parse transform +{parse_transform, erlroute_transform} must be added as compile options.
 %
 % Return: return depends on what kind of behaviour has choosen.
-% - for hybrid it return list of process where erlroute send message right from cache. 
-% It doesn't include post-matching.
+% - for hybrid it return list of process where erlroute send message matched from cache. It doesn't include post-matching.
 % - for async it always return empty list.
 % - for sync it return full list of destination processes where erlroute actually send message.
 
@@ -187,7 +195,7 @@ pub(Module, Process, Line, Topic, Message, async, EtsName) ->
     [];
 pub(Module, Process, Line, Topic, Message, sync, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    post_cache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync).
+    post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync).
 
 % load routing recursion 
 load_routing_and_send(EtsName, Topic, Message, Acc) ->
@@ -209,8 +217,8 @@ load_routing_and_send(EtsName, Topic, Message, Acc) ->
 -spec send(Routes, Message, Acc) -> Result when
     Routes  ::  [complete_routes()],
     Message ::  term(),
-    Acc     ::  list(),
-    Result  ::  list().
+    Acc     ::  [proc()],
+    Result  ::  [proc()].
 
 % sending to standart process
 send([#complete_routes{dest_type = 'process', dest = Process, method = Method}|T], Message, Acc) ->
@@ -237,7 +245,7 @@ send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|
             error_logger:error_msg("Worker not is pid"),
             Acc
     catch
-        X:Y -> error_logger:error_msg("Looks like pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
+        X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
     end,
     send(T, Message, NewAcc);
 
@@ -247,7 +255,7 @@ send([], _Message, Acc) -> Acc.
 % ================================ end of pub part =============================
 % ----------------------------------- sub part ---------------------------------
 
-% @doc Subscribe to the message flow.
+% @doc Subscribe API to the message flow.
 % Erlroute support subscription to pid, to registered process name or to the message pool like https://github.com/devinus/poolboy[Poolboy^].
 % For the process subscribed by pid or registered name it just send message.
 % For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
@@ -291,9 +299,33 @@ sub(FlowSource, FlowDest) when is_list(FlowSource) ->
     FlowSource  ::  flow_source() | nonempty_list(),
     FlowDest    ::  flow_dest().
 
-subscribe(#flow_source{module = undefined, topic = _Topic}, {_DestType, _Dest, _Method}) ->
-    ok; % todo: temporary. need implement lookup_by_topic
+% @doc subscribe with undefined module
+subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Method}) ->
+    {IsFinal, Words} = is_final_topic(Topic),
+    ets:insert('$erlroute_subscribers_by_topic_only', #subscribers_by_topic_only{
+        topic = Topic,
+        is_final_topic = IsFinal,
+        words = Words,
+        dest_type = DestType,
+        dest = Dest,
+        method = Method
+    }),
+    _ = case IsFinal of
+        true ->
+            lists:map(fun(#topics{module = Module}) ->
+                ets:insert(generate_complete_routing_name(Module), #complete_routes{
+                    topic = Topic, 
+                    dest_type = DestType, 
+                    dest = Dest, 
+                    method = Method,
+                    parent_topic = {'$erlroute_subscribers_by_topic_only', Topic}
+                })
+            end, ets:lookup('$erlroute_topics',Topic));
+        false -> todo % todo
+    end,
+    ok; 
 
+% @doc subscribe for specified module
 subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) ->
     {IsFinal, Words} = is_final_topic(Topic),
     case IsFinal of 
@@ -319,19 +351,37 @@ unsubscribe(_FlowSource,_FlowDest) -> ok. % todo
 
 % ---------------------------------other functions -----------------------------
 
-post_cache_routine(Module, Process, Line, Topic, _Message, _EtsName, _WhoGetWhileSync) ->
-    split_and_save_topic(Topic, Module, Line, Process).
-
-split_and_save_topic(Topic, Module, Line, Process) ->
-    TopicsKey = split_topic(Topic),
+post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlready) ->
+    Words = split_topic(Topic),
+    % save topic to '$erlroute_topics'
     ets:insert('$erlroute_topics', #topics{
             topic = Topic, 
-            words = TopicsKey,
+            words = Words,
             module = Module,
             line = Line,
             process = Process
         }),
-    TopicsKey.
+    % match global subscribers with specified topic
+    lists:append(WhoGetAlready, lists:map(
+        % todo: maybe better use matchspec?
+        fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method}) ->
+            case lists:member(Dest, WhoGetAlready) of 
+                false -> 
+                    ToInsert = #complete_routes{
+                        topic = Topic, 
+                        dest_type = DestType, 
+                        dest = Dest,
+                        method = Method,
+                        parent_topic = {'$erlroute_subscribers_by_topic_only', Topic}
+                    },
+                    Toreturn = send([ToInsert], Message, []),
+                    ets:insert(route_table_must_present(EtsName), ToInsert),
+                    Toreturn;
+                true ->
+                    []
+            end
+        end, ets:lookup('$erlroute_subscribers_by_topic_only', Topic)
+    )).
 
 
 % @doc generate ets name for Module for completed topics

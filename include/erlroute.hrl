@@ -43,8 +43,6 @@
         topic :: topic(),
         is_final_topic = true :: boolean(),
         words = 'undefined' :: 'undefined' | nonempty_list(),
-
-        module :: 'undefined' | module(),
         dest_type :: desttype(),
         dest :: atom(),
         method = 'info' ::'call' | 'cast' | 'info'

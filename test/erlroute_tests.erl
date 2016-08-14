@@ -17,7 +17,7 @@ publish(Topic,Msg) ->
     erlroute:pub(Topic, Msg).
 
 % tests for cover standart otp behaviour
-otp_test_() ->
+otp_tes() ->
     {setup,
         fun disable_output/0, % setup
         {inorder,
@@ -84,7 +84,7 @@ otp_test_() ->
 
 
 % tests which doesn't require started erlroute as gen_server process
-erlroute_non_started_test_() ->
+erlroute_non_started_tes() ->
     {setup,
         fun cleanup/0,
         {inparallel,
@@ -96,7 +96,13 @@ erlroute_non_started_test_() ->
                             ets:info('$erlroute_topics')
                         ) 
                     end},
-        
+                 {<<"When erlroute doesn't start, ets-table '$erlroute_subscribers_by_topic_only' must be undefined">>, 
+                    fun() -> 
+                        ?assertEqual(
+                            undefined, 
+                            ets:info('$erlroute_subscribers_by_topic_only')
+                        ) 
+                    end},
                 {<<"When erlroute doesn't start, process erlroute must be unregistered">>, 
                     fun() ->
                         ?assertEqual(
@@ -118,7 +124,7 @@ erlroute_non_started_test_() ->
     }.
 
 % tests which require started erlroute as gen_server process
-erlroute_started_test_() -> 
+erlroute_started_tes() -> 
     {setup,
         fun setup_start/0,
         fun cleanup/1,
@@ -168,6 +174,14 @@ erlroute_started_test_() ->
                             ets:info('$erlroute_topics')
                         ) 
                     end
+                },
+                {<<"When erlroute start, ets-table '$erlroute_subscribers_by_topic_only' must be present">>, 
+                    fun() -> 
+                        ?assertNotEqual(
+                            undefined, 
+                            ets:info('$erlroute_subscribers_by_topic_only')
+                        ) 
+                    end
                 }
 
             ]
@@ -175,7 +189,7 @@ erlroute_started_test_() ->
     }.
 
 % test pub_routine
-erlroute_msg_ack_test_() ->
+erlroute_inorder_tes() ->
     {setup,
         fun setup_start/0,
         fun cleanup/1,
@@ -297,257 +311,336 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
         fun cleanup/1,
         {inparallel, 
              [
-                {<<"After sub/2 with full parameters and topic <<\"*\">>, ets tables must present and route entry must present in ets">>, 
+%               {<<"After sub/2 with full parameters and topic <<\"*\">>, ets tables must present and route entry must present in ets">>, 
+%                   fun() ->
+%                       % source 
+%                       Module = mlibs:random_atom(),
+%                       Topic = <<"*">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = self(),
+%                       Method = info,
+%
+%                       EtsTable = erlroute:generate_complete_routing_name(Module),
+%                       erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+%                       MS = [{
+%                               #complete_routes{
+%                                   topic = Topic, 
+%                                   dest_type = DestType,
+%                                   dest = Dest,
+%                                   method = Method,
+%                                   parent_topic = undefined
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%               {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>, 
+%                   fun() ->
+%                       % source 
+%                       Module = mlibs:random_atom(),
+%                       Topic = <<"*">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = self(),
+%                       Method = info,
+%
+%                       EtsTable = erlroute:generate_complete_routing_name(Module),
+%                       erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
+%                       MS = [{
+%                               #complete_routes{
+%                                   topic = Topic, 
+%                                   dest_type = DestType,
+%                                   dest = Dest,
+%                                   method = Method,
+%                                   parent_topic = undefined
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%
+%               {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>, 
+%                   fun() ->
+%                       % source 
+%                       Module = mlibs:random_atom(),
+%                       Topic = <<"*">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = self(),
+%                       Method = info,
+%
+%                       EtsTable = erlroute:generate_complete_routing_name(Module),
+%                       erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
+%                       timer:sleep(5),
+%                       MS = [{
+%                               #complete_routes{
+%                                   topic = Topic, 
+%                                   dest_type = DestType,
+%                                   dest = Dest,
+%                                   method = Method,
+%                                   parent_topic = undefined
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%
+%               {<<"After sub/2 without topic it should subscribe to <<\"*\">>">>, 
+%                   fun() ->
+%                       % source 
+%                       Module = mlibs:random_atom(),
+%                       Topic = <<"*">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = self(),
+%                       Method = info,
+%
+%                       EtsTable = erlroute:generate_complete_routing_name(Module),
+%                       erlroute:sub([{module, Module}], {DestType, Dest, Method}),
+%                       timer:sleep(5),
+%                       MS = [{
+%                               #complete_routes{
+%                                   topic = Topic, 
+%                                   dest_type = DestType,
+%                                   dest = Dest,
+%                                   method = Method,
+%                                   parent_topic = undefined
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%      
+%               {<<"After multiple sync sub/6 attempts, ets tables must have only one route entry for each type/source">>, 
+%                   fun() -> 
+%                        % source 
+%                        Module = mlibs:random_atom(),
+%                        Topic = <<"*">>,
+%                        % dest
+%                        DestType = process,
+%                        Dest = self(),
+%                        Method = info,
+%               
+%                        EtsTable = erlroute:generate_complete_routing_name(Module),
+%                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+%                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+%                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+%                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+%                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+%                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
+%                        timer:sleep(5),
+%                        MS = [{
+%                                #complete_routes{
+%                                    topic = Topic, 
+%                                    dest_type = DestType,
+%                                    dest = Dest,
+%                                    method = Method,
+%                                    parent_topic = undefined
+%                                },
+%                                [],
+%                                [true]
+%                            }],
+%                        ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%               {<<"After sub/2 with full parameters and topic <<\"testtopic.*.test1.test3\">>, ets tables must present and route entry must present in ets">>, 
+%                   fun() ->
+%                       % source 
+%                       Module = mlibs:random_atom(),
+%                       Topic = <<"testtopic.*.test1.test3">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = self(),
+%                       Method = info,
+%
+%                       EtsTable = erlroute:generate_parametrized_routing_name(Module),
+%                       erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
+%                       timer:sleep(5),
+%                       MS = [{
+%                               #parametrize_routes{
+%                                   topic = Topic, 
+%                                   dest_type = DestType,
+%                                   dest = Dest,
+%                                   method = Method,
+%                                   words = ["testtopic","*","test1","test3"]
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       ?assertEqual(1, ets:select_count(EtsTable, MS))
+%                   end},
+%               {<<"Erlroute able to deliver message to single subscriber with exactly the same topic">>,
+%                   fun() ->
+%                       % source 
+%                       Module = mlibs:random_atom(),
+%                       SendTopic = <<"testtopic">>,
+%                       SubTopic = <<"testtopic">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = tutils:spawn_wait_loop(self()),
+%                       Method = info,
+%               
+%                       erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+%                       Msg = make_ref(),
+%                       timer:sleep(5),
+%                       erlroute:pub(Module, self(), ?LINE, SendTopic, Msg),
+%                       Ack = tutils:recieve_loop(),
+%                       ?assertEqual([Msg], Ack),
+%                       Dest ! stop
+%               end},
+%
+%               {<<"Erlroute able to deliver message to single subscriber who subscribe to wilcard topic">>,
+%                   fun() ->
+%                       % source 
+%                       Module = mlibs:random_atom(),
+%                       SendTopic = <<"testtopic">>,
+%                       SubTopic = <<"*">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = tutils:spawn_wait_loop(self()),
+%                       Method = info,
+%               
+%                       erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+%                       Msg = make_ref(),
+%                       timer:sleep(5),
+%                       erlroute:pub(Module, self(), ?LINE, SendTopic, Msg),
+%                       Ack = tutils:recieve_loop(),
+%                       ?assertEqual([Msg], Ack),
+%                       Dest ! stop
+%               end},
+%
+%               {<<"Erlroute able to deliver multiple message with different topic to single subscriber who subscribe to wilcard topic from same module">>,
+%                   fun() ->
+%                       % source 
+%                       Module = mlibs:random_atom(),
+%                       SendTopic1 = <<"testtopic1">>,
+%                       SendTopic2 = <<"testtopic2">>,
+%                       SubTopic = <<"*">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = tutils:spawn_wait_loop(self()),
+%                       Method = info,
+%               
+%                       erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+%                       Msg1 = make_ref(),
+%                       Msg2 = make_ref(),
+%                       timer:sleep(5),
+%                       erlroute:pub(Module, self(), ?LINE, SendTopic1, Msg1),
+%                       erlroute:pub(Module, self(), ?LINE, SendTopic2, Msg2),
+%                       Ack = tutils:recieve_loop(),
+%                       ?assertEqual([Msg2, Msg1], Ack),
+%                       Dest ! stop
+%               end},
+%               {<<"Messages from another module should do not delivered to another module subscribers">>,
+%                   fun() ->
+%                       % source 
+%                       Module1 = mlibs:random_atom(),
+%                       Module2 = mlibs:random_atom(),
+%                       SendTopic1 = <<"testtopic1">>,
+%                       SendTopic2 = <<"testtopic2">>,
+%                       SendTopic3 = <<"testtopic3">>,
+%                       SubTopic = <<"*">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = tutils:spawn_wait_loop(self()),
+%                       Method = info,
+%               
+%                       erlroute:sub([{module, Module1}, {topic, SubTopic}], {DestType, Dest, Method}),
+%                       Msg1 = make_ref(),
+%                       Msg2 = make_ref(),
+%                       Msg3 = make_ref(),
+%
+%                       timer:sleep(5),
+%                       erlroute:pub(Module1, self(), ?LINE, SendTopic1, Msg1),
+%                       erlroute:pub(Module1, self(), ?LINE, SendTopic2, Msg2),
+%                       erlroute:pub(Module2, self(), ?LINE, SendTopic3, Msg3),
+%                       Ack = tutils:recieve_loop(),
+%                       ?assertEqual([Msg2, Msg1], Ack),
+%                       Dest ! stop
+%               end},
+%               {<<"Should have entry in ets '$erlroute_subscribers_by_topic_only' after subscribe to specified topic globally">>, 
+%                   fun() ->
+%                       % source 
+%                       Topic = <<"testmegatopic">>,
+%                       % dest
+%                       DestType = process,
+%                       Dest = tutils:spawn_wait_loop(self()),
+%                       Method = info,
+%
+%                       erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
+%                       timer:sleep(5),
+%                       MS = [{
+%                               #subscribers_by_topic_only{
+%                                   topic = Topic,
+%                                   is_final_topic = true,
+%                                   words = 'undefined',
+%                                   dest_type = DestType,
+%                                   dest = Dest,
+%                                   method = Method
+%                               },
+%                               [],
+%                               [true]
+%                           }],
+%                       ?assertEqual(1, ets:select_count('$erlroute_subscribers_by_topic_only', MS))
+%               end},
+                {<<"Global subscribe to specified topic and then pub test">>, 
                     fun() ->
                         % source 
                         Module = mlibs:random_atom(),
-                        Topic = <<"*">>,
+                        Topic = atom_to_binary(Module,latin1),
                         % dest
                         DestType = process,
-                        Dest = self(),
-                        Method = info,
- 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
-                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                        MS = [{
-                                #complete_routes{
-                                    topic = Topic, 
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>, 
-                    fun() ->
-                        % source 
-                        Module = mlibs:random_atom(),
-                        Topic = <<"*">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
- 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
-                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        MS = [{
-                                #complete_routes{
-                                    topic = Topic, 
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
- 
-                {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>, 
-                    fun() ->
-                        % source 
-                        Module = mlibs:random_atom(),
-                        Topic = <<"*">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
- 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
-                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        MS = [{
-                                #complete_routes{
-                                    topic = Topic, 
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
- 
-                {<<"After sub/2 without topic it should subscribe to <<\"*\">>">>, 
-                    fun() ->
-                        % source 
-                        Module = mlibs:random_atom(),
-                        Topic = <<"*">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
- 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
-                        erlroute:sub([{module, Module}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        MS = [{
-                                #complete_routes{
-                                    topic = Topic, 
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-       
-                {<<"After multiple sync sub/6 attempts, ets tables must have only one route entry for each type/source">>, 
-                    fun() -> 
-                         % source 
-                         Module = mlibs:random_atom(),
-                         Topic = <<"*">>,
-                         % dest
-                         DestType = process,
-                         Dest = self(),
-                         Method = info,
-                
-                         EtsTable = erlroute:generate_complete_routing_name(Module),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         timer:sleep(5),
-                         MS = [{
-                                 #complete_routes{
-                                     topic = Topic, 
-                                     dest_type = DestType,
-                                     dest = Dest,
-                                     method = Method,
-                                     parent_topic = undefined
-                                 },
-                                 [],
-                                 [true]
-                             }],
-                         ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 with full parameters and topic <<\"testtopic.*.test1.test3\">>, ets tables must present and route entry must present in ets">>, 
-                    fun() ->
-                        % source 
-                        Module = mlibs:random_atom(),
-                        Topic = <<"testtopic.*.test1.test3">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
+                        Self = self(),
+                        Dest = tutils:spawn_wait_loop(Self),
+                        ?debugVal(Dest),
                         Method = info,
 
-                        EtsTable = erlroute:generate_parametrized_routing_name(Module),
-                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        MS = [{
-                                #parametrize_routes{
-                                    topic = Topic, 
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    words = ["testtopic","*","test1","test3"]
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"Erlroute able to deliver message to single subscriber with exactly the same topic">>,
-                    fun() ->
-                        % source 
-                        Module = mlibs:random_atom(),
-                        SendTopic = <<"testtopic">>,
-                        SubTopic = <<"testtopic">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-                
-                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
-                        Msg = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(Module, self(), ?LINE, SendTopic, Msg),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg], Ack),
-                        Dest ! stop
-                end},
-
-                {<<"Erlroute able to deliver message to single subscriber who subscribe to wilcard topic">>,
-                    fun() ->
-                        % source 
-                        Module = mlibs:random_atom(),
-                        SendTopic = <<"testtopic">>,
-                        SubTopic = <<"*">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-                
-                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
-                        Msg = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(Module, self(), ?LINE, SendTopic, Msg),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg], Ack),
-                        Dest ! stop
-                end},
-
-                {<<"Erlroute able to deliver multiple message with different topic to single subscriber who subscribe to wilcard topic from same module">>,
-                    fun() ->
-                        % source 
-                        Module = mlibs:random_atom(),
-                        SendTopic1 = <<"testtopic1">>,
-                        SendTopic2 = <<"testtopic2">>,
-                        SubTopic = <<"*">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-                
-                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
                         Msg1 = make_ref(),
-                        Msg2 = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(Module, self(), ?LINE, SendTopic1, Msg1),
-                        erlroute:pub(Module, self(), ?LINE, SendTopic2, Msg2),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg2, Msg1], Ack),
-                        Dest ! stop
-                end},
-                {<<"Messages from another module should do not delivered to another module subscribers">>,
-                    fun() ->
-                        % source 
-                        Module1 = mlibs:random_atom(),
-                        Module2 = mlibs:random_atom(),
-                        SendTopic1 = <<"testtopic1">>,
-                        SendTopic2 = <<"testtopic2">>,
-                        SendTopic3 = <<"testtopic3">>,
-                        SubTopic = <<"*">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-                
-                        erlroute:sub([{module, Module1}, {topic, SubTopic}], {DestType, Dest, Method}),
-                        Msg1 = make_ref(),
-                        Msg2 = make_ref(),
-                        Msg3 = make_ref(),
 
+                        erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
                         timer:sleep(5),
-                        erlroute:pub(Module1, self(), ?LINE, SendTopic1, Msg1),
-                        erlroute:pub(Module1, self(), ?LINE, SendTopic2, Msg2),
-                        erlroute:pub(Module2, self(), ?LINE, SendTopic3, Msg3),
+                        MS = [{
+                                #subscribers_by_topic_only{
+                                    topic = Topic,
+                                    is_final_topic = true,
+                                    words = 'undefined',
+                                    dest_type = DestType,
+                                    dest = Dest,
+                                    method = Method
+                                },
+                                [],
+                                [true]
+                            }],
+                        ?assertEqual(1, ets:select_count('$erlroute_subscribers_by_topic_only', MS)),
+
+                        EtsName = erlroute:generate_complete_routing_name(Module),
+
+                        ?assertEqual(undefined,ets:info(EtsName)),
+
+
+                        [] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
+                        timer:sleep(5),
+                        
+                        ?assertNotEqual(undefined,ets:info(EtsName)),
+                        ?assertEqual(1, ets:info(EtsName, size)),
+
                         Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg2, Msg1], Ack),
+                        ?assertEqual([Msg1], Ack),
+
+                        [Dest] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
+                        timer:sleep(5),
+
+                        ?assertEqual(1, ets:info(EtsName, size)),
+
+                        Ack2 = tutils:recieve_loop(),
+                        ?assertEqual([Msg1], Ack2),
+
                         Dest ! stop
-                end}
+                    end}
 %       
 %                {<<"After sync unsub/6, ets table must do not contain route entry">>,
 %                    fun() ->
