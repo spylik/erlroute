@@ -596,7 +596,6 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         DestType = process,
                         Self = self(),
                         Dest = tutils:spawn_wait_loop(Self),
-                        ?debugVal(Dest),
                         Method = info,
 
                         Msg1 = make_ref(),
