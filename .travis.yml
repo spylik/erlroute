@@ -4,8 +4,8 @@ script:
   - make dialyze
   - make tests COVER=1
 otp_release:
-  - 18.0
+  - 18.3
 sudo: false
 
 after_success:
-  - make sendcoverreport
+  - make sendcoverreport2
