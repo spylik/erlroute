@@ -8,3 +8,6 @@ otp_release:
   - 18.3
   - 18.0
 sudo: false
+
+after_success:
+  - make coverage-report
