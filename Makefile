@@ -6,10 +6,10 @@ dep_teaser = git https://github.com/spylik/teaser master
 
 TEST_DEPS = poolboy
 
-ifeq ($(USER),travis)
-    TEST_DEPS += ecoveralls
-    dep_ecoveralls = git https://github.com/nifoc/ecoveralls master
-endif
+#ifeq ($(USER),travis)
+    TEST_DEPS += coveralls-erl
+    dep_coveralls-erl = git https://github.com/markusn/coveralls-erl master
+#endif
 
 SHELL_DEPS = sync lager
 
@@ -18,6 +18,5 @@ SHELL_OPTS = -pa ebin/ test/ -env ERL_LIBS deps -eval 'code:ensure_loaded(erlrou
 
 include erlang.mk
 
-coverage-report: $(shell ls -1rt `find logs -type f -name \*.coverdata 2>/dev/null` | tail -n1) $(gen_verbose) erl -noshell -pa ebin deps/*/ebin -eval 'ecoveralls:travis_ci("$?"), init:stop()'
-
-.PHONY: coverage-report
+sendcoverreport: 
+	erl -noshell -pa ebin/ test/ -env ERL_LIBS deps -eval 'coveralls:convert_and_send_file("eunit.coverdata","$ENV{TRAVIS_JOB_ID}","travis-ci")'

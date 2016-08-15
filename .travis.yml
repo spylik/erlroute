@@ -1,7 +1,7 @@
 language: erlang
 script: 
   - make
-  - make tests
+  - make tests COVER=1
   - make dialyze
 otp_release:
   - 19.0
@@ -10,4 +10,4 @@ otp_release:
 sudo: false
 
 after_success:
-  - make coverage-report
+  - make sendcoverreport
