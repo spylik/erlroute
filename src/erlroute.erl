@@ -270,11 +270,11 @@ sub(Topic) when is_binary(Topic) -> sub(#flow_source{module = undefined, topic =
 % @doc subscribe current process to messages with full-defined FlowSource ([{module, Module}, {topic, Topic}])
 sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), info}).
 
+% @doc full subscribtion api
 -spec sub(FlowSource,FlowDest) -> ok when
-    FlowSource  :: flow_source() | [{module, module()} | {topic, binary()}],
+    FlowSource  :: flow_source() | nonempty_list(),
     FlowDest    :: flow_dest().
 
-% we don't want to crash gen_server process, so we validating data on caller side
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when 
         is_atom(Module),
         is_binary(Topic),
