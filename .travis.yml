@@ -5,7 +5,6 @@ script:
   - make dialyze
 otp_release:
   - 19.0
-  - 18.3
   - 18.0
 sudo: false
 
