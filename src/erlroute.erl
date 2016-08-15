@@ -256,14 +256,19 @@ send([], _Message, Acc) -> Acc.
 % ----------------------------------- sub part ---------------------------------
 
 % @doc Subscribe API to the message flow.
-% Erlroute support subscription to pid, to registered process name or to the message pool like https://github.com/devinus/poolboy[Poolboy^].
+% Erlroute suport pid, registered process name and the message pool like https://github.com/devinus/poolboy[Poolboy^] as destination.
 % For the process subscribed by pid or registered name it just send message.
 % For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
 
--spec sub(FlowSource) -> ok when
-    FlowSource  :: flow_source() | nonempty_list().
+-spec sub(Target) -> ok when
+    Target  :: flow_source() | nonempty_list() | binary() | module().
 
-sub(FlowSource) -> sub(FlowSource, {process, self(), info}).
+% @doc subscribe current process to all messages from module Module
+sub(Module) when is_binary(Module) -> sub(#flow_source{module = Module, topic = <<"*">>}, {process, self(), info});
+% @doc subscribe current process to messages with topic Topic from any module
+sub(Topic) when is_binary(Topic) -> sub(#flow_source{module = undefined, topic = Topic}, {process, self(), info});
+% @doc subscribe current process to messages with full-defined FlowSource ([{module, Module}, {topic, Topic}])
+sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), info}).
 
 -spec sub(FlowSource,FlowDest) -> ok when
     FlowSource  :: flow_source() | nonempty_list(),

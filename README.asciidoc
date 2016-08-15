@@ -80,7 +80,7 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 -spec erlroute:pub(Topic, Message) -> ok
     when
         Topic   :: binary(),
-        Message ::` term().
+        Message :: term().
 ----
 
 
@@ -98,6 +98,24 @@ Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlro
 ----    
 
 === Subscription
+
+[source,erlang]
+----
+% @doc Shortcut to `erlroute:sub([{module, Module} | {topic, <<"*">>}], {pid, self(), info})`.
+
+-spec erlroute:sub(Module) -> ok
+    when
+        Module  ::  module().
+----
+
+[source,erlang]
+----
+% @doc Shortcut to `erlroute:sub([{module, undefined} | {topic, Topic}], {pid, self(), info})`.
+
+-spec erlroute:sub(Topic) -> ok
+    when
+        Topic  ::  binary().
+----
 
 [source,erlang]
 ----
