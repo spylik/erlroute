@@ -20,7 +20,7 @@ SHELL_OPTS = -pa ebin/ test/ -env ERL_LIBS deps -eval 'code:ensure_loaded(erlrou
 include erlang.mk
 
 sendcoverreport: 
-	erl -noshell -pa ebin/ test/ -env ERL_LIBS deps -eval 'coveralls:convert_and_send_file("eunit.coverdata",os:getenv("TRAVIS_JOB_ID"),"travis-ci")'
+	erl -noshell -pa ebin/ test/ -env ERL_LIBS deps -eval '{ok, Dir} = file:get_cwd(), {ok, Listing} = file:list_dir(Dir), io:format("files is ~p",[Listing]), coveralls:convert_and_send_file("eunit.coverdata",os:getenv("TRAVIS_JOB_ID"),"travis-ci")'
 
 sendcoverreport2:
-	erl -noshell -pa ebin/ test/ -env ERL_LIBS deps -eval 'ecoveralls:travis_ci("eunit.coverdata"),init:stop()'
+	erl -noshell -pa ebin/ test/ -env ERL_LIBS deps -eval '{ok, Dir} = file:get_cwd(), {ok, Listing} = file:list_dir(Dir), io:format("files is ~p",[Listing]), ecoveralls:travis_ci("eunit.coverdata"),init:stop()'
