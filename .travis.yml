@@ -1,8 +1,8 @@
 language: erlang
 script: 
   - make
-  - make tests COVER=1
   - make dialyze
+  - make tests COVER=1
 otp_release:
   - 19.0
   - 18.0
