@@ -1,8 +1,10 @@
 language: erlang
 script: 
   - make
+  - make dialyze
   - make tests COVER=1
 otp_release:
+  - 19.0
   - 18.3
 sudo: false
 
