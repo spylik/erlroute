@@ -7,4 +7,4 @@ otp_release:
 sudo: false
 
 after_success:
-  - make sendcoverreport2
+  - make sendcoverreport

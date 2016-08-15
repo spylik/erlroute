@@ -21,6 +21,5 @@ include erlang.mk
 
 sendcoverreport: 
 	erl -noshell -pa ebin/ test/ -env ERL_LIBS deps -eval '{ok, Dir} = file:get_cwd(), {ok, Listing} = file:list_dir(Dir), io:format("files is ~p",[Listing]), JobId = unicode:characters_to_binary(os:getenv("TRAVIS_JOB_ID")), io:format("job is ~p",[JobId]), coveralls:convert_and_send_file("eunit.coverdata",os:getenv("TRAVIS_JOB_ID"),"travis-ci")'
-
-sendcoverreport2:
-	erl -noshell -pa ebin/ test/ -env ERL_LIBS deps -eval '{ok, Dir} = file:get_cwd(), {ok, Listing} = file:list_dir(Dir), io:format("files is ~p",[Listing]), JobId = unicode:characters_to_binary(os:getenv("TRAVIS_JOB_ID")), io:format("job is ~p",[JobId]), ecoveralls:travis_ci("eunit.coverdata"),init:stop()'
+#sendcoverreport2:
+#	erl -noshell -pa ebin/ test/ -env ERL_LIBS deps -eval '{ok, Dir} = file:get_cwd(), {ok, Listing} = file:list_dir(Dir), io:format("files is ~p",[Listing]), JobId = unicode:characters_to_binary(os:getenv("TRAVIS_JOB_ID")), io:format("job is ~p",[JobId]), ecoveralls:travis_ci("eunit.coverdata"),init:stop()'
