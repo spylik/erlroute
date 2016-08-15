@@ -1,11 +1,4 @@
-image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build Status", link="https://travis-ci.org/spylik/erlroute"] 
-image:https://coveralls.io/repos/github/spylik/erlroute/badge.svg?branch=develop[title="Test coverage", link="https://coveralls.io/github/spylik/erlroute?branch="]
-
-textfile
-!https://coveralls.io/repos/github/spylik/erlroute/badge.svg?branch=(Coverage Status)!:https://coveralls.io/github/spylik/erlroute?branch=
-
-markdown
-[![Coverage Status](https://coveralls.io/repos/github/spylik/erlroute/badge.svg?branch=)](https://coveralls.io/github/spylik/erlroute?branch=)
+image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build Status", link="https://travis-ci.org/spylik/erlroute"] image:https://coveralls.io/repos/github/spylik/erlroute/badge.svg?branch=develop[title="Test coverage", link="https://coveralls.io/github/spylik/erlroute?branch=develop"]
 
 = Erlroute
 

@@ -6,11 +6,11 @@ dep_teaser = git https://github.com/spylik/teaser master
 
 TEST_DEPS = poolboy
 
-#ifeq ($(USER),travis)
+ifeq ($(USER),travis)
     TEST_DEPS += coveralls-erl ecoveralls
     dep_coveralls-erl = git https://github.com/markusn/coveralls-erl master
 	dep_ecoveralls = git https://github.com/nifoc/ecoveralls master
-#endif
+endif
 
 SHELL_DEPS = sync lager
 
