@@ -271,7 +271,7 @@ sub(Topic) when is_binary(Topic) -> sub(#flow_source{module = undefined, topic =
 sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), info}).
 
 -spec sub(FlowSource,FlowDest) -> ok when
-    FlowSource  :: flow_source() | nonempty_list(),
+    FlowSource  :: flow_source() | [{module, module()} | {topic, binary()}],
     FlowDest    :: flow_dest().
 
 % we don't want to crash gen_server process, so we validating data on caller side
