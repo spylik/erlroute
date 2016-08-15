@@ -2,28 +2,6 @@
 %% File:    erlroute.erl
 %% @author  Oleksii Semilietov <spylik@gmail.com>
 %%
-%% @doc
-%% This source code contin static & dynamic message routing rules from one module or process 
-%% to another. Static routing a little bit faster than ETS-based dynamic pub/sub,
-%% but need to be hardcoded.
-%%
-%% It is not pub/sub queue broker it is pub/sub router without queue-logic overhead.
-%% This module use native erlang queue-logic and pure erlang message passing.
-%% When we don't need to use full AMQP futures, messages via erlroute going to be much 
-%% cheap and faster than RabbitMQ. 
-%% 
-%% Every publisher by default have 2 dynamic routes - by_module_name and by_pid. 
-%% Subscribes can subscribe for messages from specified module or process id.
-%% 
-%% Every static routing rules we should close by dyn_route/4 function for add 
-%% dynamic futures. Also in dyn_route function we pushes data to RabbitMQ broker.
-%%
-%% Functions from this process can be called directly via gen_server:call 
-%% or gen_server:cast functions. Of course direct functions works a little bit faster, but 
-%% we also can use message passing when need this future.
-%%
-%% More documentation and examples at https://github.com/spylik/erlroute
-%% @end
 %% --------------------------------------------------------------------------------
 
 -module(erlroute).
@@ -33,6 +11,7 @@
 -endif.
 
 -include("erlroute.hrl").
+-include("deps/teaser/include/utils.hrl").
 
 % gen server is here
 -behaviour(gen_server).
@@ -45,9 +24,11 @@
 -export([
         start_link/0,
         stop/0, stop/1,
-        pub/4,
-        sub/4, sub/5, sub/6,
-        unsub/4, unsub/5, unsub/6
+        pub/5,
+        full_async_pub/5,
+        full_sync_pub/5,
+        sub/2,
+        sub/1
     ]).
 
 % we will use ?MODULE as servername
@@ -68,63 +49,69 @@ stop(async) ->
 
 % we going to create ETS tables for dynamic routing rules in init section
 -spec init([]) -> {ok, undefined}.
+
 init([]) ->
-    _ = ets:new(msg_routes, [
-            set, 
-            protected, 
-            {keypos, #msg_routes.ets_name}, 
-            {read_concurrency, true}, 
+    _ = ets:new('$erlroute_topics', [
+            bag,
+            protected,
+            {read_concurrency, true}, % todo: test does it affect performance for writes?
+            {keypos, #topics.topic},
             named_table
         ]),
+    _ = ets:new('$erlroute_global_sub', [
+            bag,
+            protected,
+            {read_concurrency, true}, % todo: test doesrt affect performance for writes?
+            {keypos, #subscribers_by_topic_only.topic},
+            named_table
+        ]),
+
     {ok, undefined}.
 
 %--------------handle_call-----------------
 
-handle_call({sub, Type, Source, Topic, Dest, DestType}, _From, State) ->
-    Result = subscribe(Type, Source, Topic, Dest, DestType),
+handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
+    Result = subscribe(FlowSource, FlowDest),
     {reply, Result, State};
 
-handle_call({unsub, Type, Source, Topic, Dest, DestType}, _From, State) ->
-    Result = unsubscribe(Type, Source, Topic, Dest, DestType),
-    {reply, Result, State};
+handle_call({unsubscribe, FlowSource, FlowDest}, _From, State) ->
+    unsubscribe(FlowSource, FlowDest),
+    {reply, ok, State};
 
-% handle_call for stop
 handle_call(stop, _From, State) ->
     {stop, normal, State};
 
-% handle_call for all other thigs
 handle_call(Msg, _From, State) ->
     error_logger:warning_msg("we are in undefined handle_call with message ~p\n",[Msg]),
     {reply, ok, State}.
 
 %-----------end of handle_call-------------
 
-
 %--------------handle_cast-----------------
 
-handle_cast({sub, Type, Source, Topic, Dest, DestType}, State) ->
-    subscribe(Type, Source, Topic, Dest, DestType),
+handle_cast({new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}, State) ->
+    _ = post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync),
     {noreply, State};
 
-handle_cast({unsub, Type, Source, Topic, Dest, DestType}, State) ->
-    unsubscribe(Type, Source, Topic, Dest, DestType),
+handle_cast({subscribe, FlowSource, FlowDest}, State) ->
+    _ = subscribe(FlowSource,FlowDest),
     {noreply, State};
 
-% handle_cast for stop
+handle_cast({unsubscribe, FlowSource, FlowDest}, State) ->
+    _ = unsubscribe(FlowSource,FlowDest),
+    {noreply, State};
+
 handle_cast(stop, State) ->
     {stop, normal, State};
 
-% handle_cast for all other thigs
 handle_cast(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle_cast with message ~p\n",[Msg]),
     {noreply, State}.
 
 %-----------end of handle_cast-------------
 
-
 %--------------handle_info-----------------
 
-% handle_info for all other thigs
 handle_info(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle_info with message ~p\n",[Msg]),
     {noreply, State}.
@@ -140,211 +127,329 @@ code_change(_OldVsn, State, _Extra) ->
 % ============================= end of gen_server part =========================
 % ----------------------------------- pub part ---------------------------------
 
--spec pub(Module, Pid, Topic, Message) -> ok when
-    Module  ::  atom(),
-    Pid     ::  pid() | atom(),
+% @doc Publish message API. Default is hybrid behaviour:
+% - check if route table existing (cache per module)
+% - for cached routes it send message async
+% - at the end it cast to erlroute and erlroute try to match not yet cached routes
+%
+% Also aviable 'erlroute:full_async_pub/5' and 'erlroute:full_sync_pub/5' with same parameters.
+%
+% For publish avialiable following parse_transform and macros shourtcuts:
+%
+% pub(Message) ----> generating topic and transforming to
+% pub(?MODULE, self(), ?LINE, <<"?MODULE.?LINE">>, Message, hybrid, '$erlroute_?MODULE')
+%
+% pub(Message, Topic) ----> transforming to
+% pub(?MODULE, self(), ?LINE, Topic, Message, hybrid, '$erlroute_?MODULE')
+%
+% To use parse transform +{parse_transform, erlroute_transform} must be added as compile options.
+%
+% Return: return depends on what kind of behaviour has choosen.
+% - for hybrid it return list of process where erlroute send message matched from cache. It doesn't include post-matching.
+% - for async it always return empty list.
+% - for sync it return full list of destination processes where erlroute actually send message.
+
+% hybrid
+-spec pub(Module, Process, Line, Topic, Message) -> Result when
+    Module  ::  module(),
+    Process ::  proc(),
+    Line    ::  pos_integer(),
     Topic   ::  binary(),
-    Message ::  term().
+    Message ::  term(),
+    Result  ::  [] | [proc()].
 
-%------------------------------------------%
-%    static hardcoded rules can be here    %
-%------------------------------------------%
+pub(Module, Process, Line, Topic, Message) ->
+    pub(Module, Process, Line, Topic, Message, hybrid, generate_complete_routing_name(Module)).
 
-% final clause - if we don't mutch before any clueses, we just 
-% going to dynamic routing part
-pub(Module, Pid, Topic, Message) ->
-    dyn_route(Module, Pid, Topic, Message).
+% full_async
+-spec full_async_pub(Module, Process, Line, Topic, Message) -> Result when
+    Module  ::  module(),
+    Process ::  proc(),
+    Line    ::  pos_integer(),
+    Topic   ::  binary(),
+    Message ::  term(),
+    Result  ::  []. % in async we always return [] cuz we don't know yet subscribers
 
-% dynamic ETS-routes 
-dyn_route(Module, Pid, Topic, Message) ->
-    % first - we going to send by_module_name because identify 
-    % process by module name is more often
-    load_routing_and_send(generate_routing_name(by_module_name, Module), Topic, Message),
-    
-    % and second - by_pid or registered name (atom)
-    load_routing_and_send(generate_routing_name(by_pid, Pid), Topic, Message).
+full_async_pub(Module, Process, Line, Topic, Message) ->
+    pub(Module, Process, Line, Topic, Message, async, generate_complete_routing_name(Module)).
+
+% full_sync
+-spec full_sync_pub(Module, Process, Line, Topic, Message) -> Result when
+    Module  ::  module(),
+    Process ::  proc(),
+    Line    ::  pos_integer(),
+    Topic   ::  binary(),
+    Message ::  term(),
+    Result  ::  [] | [proc()].
+
+full_sync_pub(Module, Process, Line, Topic, Message) ->
+    pub(Module, Process, Line, Topic, Message, sync, generate_complete_routing_name(Module)).
+
+% do parse_transfrorm to pub/7 wherever it possible to avoid atom construction during runtime
+pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
+    WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
+    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}), 
+    WhoGetWhileSync;
+pub(Module, Process, Line, Topic, Message, async, EtsName) ->
+    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, []}), 
+    [];
+pub(Module, Process, Line, Topic, Message, sync, EtsName) ->
+    WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
+    post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync).
 
 % load routing recursion 
-load_routing_and_send(EtsName, Topic, Message) ->
+load_routing_and_send(EtsName, Topic, Message, Acc) ->
     try ets:lookup(EtsName, Topic) of 
         [] when Topic =/= <<"*">> -> 
-            load_routing_and_send(EtsName, <<"*">>, Message);
+            load_routing_and_send(EtsName, <<"*">>, Message, Acc);
         [] ->
-            ok;
+            Acc;
         Routes when Topic =/= <<"*">> -> 
             % send to wildcard-topic subscribers
-            send(Routes, Message),
-            load_routing_and_send(EtsName, <<"*">>, Message);
+            load_routing_and_send(EtsName, <<"*">>, Message, send(Routes, Message, Acc));
         Routes ->
-            send(Routes, Message)
+            send(Routes, Message, Acc)
     catch
         _:_ ->
-            ok
+            Acc
     end.
 
+-spec send(Routes, Message, Acc) -> Result when
+    Routes  ::  [complete_routes()],
+    Message ::  term(),
+    Acc     ::  [proc()],
+    Result  ::  [proc()].
+
 % sending to standart process
-send([{active_route,_,Pid,pid}|T], Message) ->
-    Pid ! Message,
-    send(T, Message);
+send([#complete_routes{dest_type = 'process', dest = Process, method = Method}|T], Message, Acc) ->
+    case Method of
+        info -> Process ! Message;
+        cast -> gen_server:cast(Process, Message);
+        call -> gen_server:call(Process, Message)
+    end,
+    send(T, Message, [Process|Acc]);
 
 % sending to poolboy pool
-send([{active_route,_,Pool,poolboy_pool}|T], Message) ->
-    try poolboy:checkout(Pool) of
+send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|T], Message, Acc) ->
+    NewAcc = try poolboy:checkout(PoolName) of
         Worker when is_pid(Worker) -> 
             gen_server:cast(Worker, Message),
-            poolboy:checkin(Pool, Worker);
+            case Method of
+                info -> Worker ! Message;
+                cast -> gen_server:cast(Worker, Message);
+                call -> gen_server:call(Worker, Message)
+            end,
+            poolboy:checkin(PoolName, Worker),
+            [Worker|Acc];
         _ ->
-            error_logger:error_msg("Worker not is pid")
+            error_logger:error_msg("Worker not is pid"),
+            Acc
     catch
-        X:Y -> error_logger:error_msg("Looks like pool ~p not found, got error ~p with reason ~p",[Pool,X,Y])
+        X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
     end,
-    send(T,Message);
+    send(T, Message, NewAcc);
 
 % final clause for empty list
-send([], _Message) -> ok.
+send([], _Message, Acc) -> Acc.
 
 % ================================ end of pub part =============================
 % ----------------------------------- sub part ---------------------------------
-% @doc
-% We create dynamic rules when going to subscirbe.
-% While ETS route table not present, we do not waste time for processing dynamic 
-% routes.
-% @end
 
-%------- public api: sub section ----------
+% @doc Subscribe API to the message flow.
+% Erlroute suport pid, registered process name and the message pool like https://github.com/devinus/poolboy[Poolboy^] as destination.
+% For the process subscribed by pid or registered name it just send message.
+% For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
 
-% sub / 4
-% async subscribe to pid (default)
--spec sub(by_module_name | by_pid, Source, Topic, Dest) -> ok when
-    Source  ::  pid() | atom() | term(),
-    Topic   ::  binary(),
-    Dest    ::  pid() | atom().
+-spec sub(Target) -> ok when
+    Target  :: flow_source() | nonempty_list() | binary() | module().
 
-sub(Type, Source, Topic, Dest) ->
-    sub(async, Type, Source, Topic, Dest, pid).
+% @doc subscribe current process to all messages from module Module
+sub(Module) when is_atom(Module) -> sub(#flow_source{module = Module, topic = <<"*">>}, {process, self(), info});
+% @doc subscribe current process to messages with topic Topic from any module
+sub(Topic) when is_binary(Topic) -> sub(#flow_source{module = undefined, topic = Topic}, {process, self(), info});
+% @doc subscribe current process to messages with full-defined FlowSource ([{module, Module}, {topic, Topic}])
+sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), info}).
 
+% @doc full subscribtion api
+-spec sub(FlowSource,FlowDest) -> ok when
+    FlowSource  :: flow_source() | nonempty_list(),
+    FlowDest    :: flow_dest() | pid() | atom().
 
-% sub / 5
-% async/sync subscribe to pid
--spec sub(sync | async, by_module_name | by_pid, Source, Topic, Dest) -> ok when
-    Source  ::  pid() | atom() | term(),
-    Topic   ::  binary(),
-    Dest    ::  pid() | atom().
+sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when 
+        is_atom(Module),
+        is_binary(Topic),
+        DestType =:= 'process' orelse DestType =:= 'poolboy',
+        is_pid(Dest) orelse is_atom(Dest),
+        Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' ->
+    gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
-sub(async, Type, Source, Topic, Dest) ->
-    sub(async, Type, Source, Topic, Dest, pid);
-sub(sync, Type, Source, Topic, Dest) ->
-    sub(sync, Type, Source, Topic, Dest, pid).
+% when Dest is pid() or atom
+sub(FlowSource, FlowDest) when is_pid(FlowDest) orelse is_atom(FlowDest) ->
+    sub(FlowSource, {process, FlowDest, info});
 
+% when FlowSource is_list 
+sub(FlowSource, FlowDest) when is_list(FlowSource) ->
+    sub(#flow_source{
+            module = case lists:keyfind(module, 1, FlowSource) of 
+                false -> undefined; 
+                {module, Data} -> Data
+            end,
+            topic = case lists:keyfind(topic, 1, FlowSource) of 
+                false -> <<"*">>; 
+                {topic, Data} -> Data 
+            end
+        }, FlowDest).
 
-% sub / 6
-% async/sync subscribe (to pid or poolboy_pool)
--spec sub(sync | async, by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> ok when
-    Source  ::  pid() | atom() | term(),
-    Topic   ::  binary(),
-    Dest    ::  pid() | atom().
+-spec subscribe(FlowSource,FlowDest) -> ok when
+    FlowSource  ::  flow_source() | nonempty_list(),
+    FlowDest    ::  flow_dest().
 
-sub(async, Type, Source, Topic, Dest, DestType) ->
-    gen_server:cast(?MODULE, {sub, Type, Source, Topic, Dest, DestType});
-sub(sync, Type, Source, Topic, Dest, DestType) ->
-    gen_server:call(?MODULE, {sub, Type, Source, Topic, Dest, DestType}).
+% @doc subscribe with undefined module
+subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Method}) ->
+    {IsFinal, Words} = is_final_topic(Topic),
+    ets:insert('$erlroute_global_sub', #subscribers_by_topic_only{
+        topic = Topic,
+        is_final_topic = IsFinal,
+        words = Words,
+        dest_type = DestType,
+        dest = Dest,
+        method = Method
+    }),
+    _ = case IsFinal of
+        true ->
+            lists:map(fun(#topics{module = Module}) ->
+                ets:insert(route_table_must_present(generate_complete_routing_name(Module)), 
+                    #complete_routes{
+                        topic = Topic, 
+                        dest_type = DestType, 
+                        dest = Dest, 
+                        method = Method,
+                        parent_topic = {'$erlroute_global_sub', Topic}
+                    }
+                )
+            end, ets:lookup('$erlroute_topics',Topic));
+        false -> todo % implement for parametrized topics
+    end,
+    ok; 
 
-%----- end of public api: sub section ----
-
-% subscribe routine (called from gen_server call/cast)
--spec subscribe(by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> true when
-    Source  ::  pid() | atom() | term(),
-    Topic   ::  binary(),
-    Dest    ::  pid() | atom().
-
-subscribe(Type, Source, Topic, Dest, DestType) ->
-    EtsName = generate_routing_name(Type, Source),
-    _ = route_table_must_present(EtsName),
-    ets:insert(EtsName, #active_route{topic=Topic, dest=Dest, dest_type=DestType}).
-
+% @doc subscribe for specified module
+subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) ->
+    {IsFinal, Words} = is_final_topic(Topic),
+    case IsFinal of 
+        true ->
+            EtsName = generate_complete_routing_name(Module),
+            _ = route_table_must_present(EtsName),
+            ets:insert(EtsName, #complete_routes{topic=Topic, dest_type=DestType, dest=Dest, method=Method});
+        false ->
+            EtsName = generate_parametrized_routing_name(Module),
+            _ = route_table_must_present(EtsName),
+            ets:insert(EtsName, #parametrize_routes{topic=Topic, dest_type=DestType, dest=Dest, method=Method, words=Words})
+            % todo: then need try match this topic from '$erlroute_topics'
+    end, ok.
 
 % ================================ end of sub part =============================
 % ----------------------------------- unsub part -------------------------------
-% @doc
-% When we going to unsubscribe, we just delete record from ets-table
-% @end
 
-% async unsubscribe from pid (default)
--spec unsub(by_module_name | by_pid, Source, Topic, Dest) -> ok when
-    Source  ::  pid() | atom() | term(),
-    Topic   ::  binary(),
-    Dest    ::  pid() | atom().
-
-unsub(Type, Source, Topic, Dest) ->
-    unsub(async, Type, Source, Topic, Dest, pid).
-
-% async/sync unsubscribe from pid
--spec unsub(sync | async, by_module_name | by_pid, Source, Topic, Dest) -> ok when
-    Source  ::  pid() | atom() | term(),
-    Topic   ::  binary(),
-    Dest    ::  pid() | atom().
-
-unsub(async, Type, Source, Topic, Dest) ->
-    unsub(async, Type, Source, Topic, Dest, pid);
-
-unsub(sync, Type, Source, Topic, Dest) ->
-    unsub(sync, Type, Source, Topic, Dest, pid).
-
-% async/sync unsubscribe (from pid or poolboy_pool)
--spec unsub(sync | async, by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> ok when
-    Source  ::  pid() | atom() | term(),
-    Topic   ::  binary(),
-    Dest    ::  pid() | atom().
-
-% async
-unsub(async, Type, Source, Topic, Dest, DestType) ->
-    gen_server:cast(?MODULE, {unsub, Type, Source, Topic, Dest, DestType});
-
-% sync
-unsub(sync, Type, Source, Topic, Dest, DestType) ->
-    gen_server:call(?MODULE, {unsub, Type, Source, Topic, Dest, DestType}).
-
-% unsubscribe routine (called from gen_server call/cast)
--spec unsubscribe(by_module_name | by_pid, Source, Topic, Dest, pid | poolboy_pool) -> true when
-    Source  ::  pid() | atom() | term(),
-    Topic   ::  binary(),
-    Dest    ::  pid() | atom().
-
-
-unsubscribe(Type, Source, Topic, Dest, DestType) ->
-    EtsName = generate_routing_name(Type, Source),
-    ets:match_delete(EtsName, #active_route{topic=Topic, dest=Dest, dest_type=DestType}).
-
+unsubscribe(_FlowSource,_FlowDest) -> ok. % todo
 % ================================ end of sub part =============================
+
+
+
+
 % ---------------------------------other functions -----------------------------
 
+post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlready) ->
+    Words = split_topic(Topic),
+    % save topic to '$erlroute_topics'
+    ets:insert('$erlroute_topics', #topics{
+            topic = Topic, 
+            words = Words,
+            module = Module,
+            line = Line,
+            process = Process
+        }),
+    % match global subscribers with specified topic
+    lists:append(WhoGetAlready, lists:map(
+        % todo: maybe better use matchspec?
+        fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method}) ->
+            case lists:member(Dest, WhoGetAlready) of 
+                false -> 
+                    ToInsert = #complete_routes{
+                        topic = Topic, 
+                        dest_type = DestType, 
+                        dest = Dest,
+                        method = Method,
+                        parent_topic = {'$erlroute_global_sub', Topic}
+                    },
+                    Toreturn = send([ToInsert], Message, []),
+                    ets:insert(route_table_must_present(EtsName), ToInsert),
+                    Toreturn;
+                true ->
+                    []
+            end
+        end, ets:lookup('$erlroute_global_sub', Topic)
+    )).
 
-% generate routing name which should used for ets table
--spec generate_routing_name(by_module_name | by_pid, Source) -> ok when
-    Source  ::  pid() | atom() | term().
 
-generate_routing_name(Type, Source) when is_atom(Source)->
-    list_to_atom("route_" ++ atom_to_list(Type) ++ "_" ++ atom_to_list(Source));
-generate_routing_name(Type, Source) when is_pid(Source)->
-    list_to_atom("route_" ++ atom_to_list(Type) ++ "_" ++ pid_to_list(Source)).
+% @doc generate ets name for Module for completed topics
+-spec generate_complete_routing_name(Module) -> EtsName when
+    Module  ::  module(),
+    EtsName ::  atom().
 
+generate_complete_routing_name(Module) when is_atom(Module)->
+    list_to_atom("$erlroute_cmp_" ++ atom_to_list(Module)).
 
-% check if ets routing table is present, on falure - let's create it 
--spec route_table_must_present (EtsName) -> ok | {created,ok} when
-      EtsName   ::  atom().
+% @doc generate ets name for Module for parametrized topics
+-spec generate_parametrized_routing_name(Module) -> EtsName when
+    Module  ::  module(),
+    EtsName ::  atom().
+
+generate_parametrized_routing_name(Module) when is_atom(Module)->
+    list_to_atom("$erlroute_prm_" ++ atom_to_list(Module)).
+
+% @doc Check if ets routing table is present, on falure - let's create it 
+-spec route_table_must_present (EtsName) -> Result when
+      EtsName   ::  atom(),
+      Result    ::  ets:tid() | ok.
 
 route_table_must_present(EtsName) ->
    case ets:info(EtsName, size) of
-       undefined ->
-           _ = ets:new(EtsName, [
-                   bag, 
-                   protected, 
-                   {read_concurrency, true}, 
-                   {keypos, #active_route.topic}, 
-                   named_table
-               ]),
-           _ = ets:insert(msg_routes, #msg_routes{ets_name=EtsName}),
-           {created, EtsName};
+       undefined -> 
+            ets:new(EtsName, [bag, protected, 
+                {read_concurrency, true}, 
+                {keypos, #complete_routes.topic}, 
+                named_table
+            ]);
        _ ->
            ok
    end.
+
+% @doc check is this topic in final condition or not.
+% if it contain * or ! it means this is parametrized topic
+-spec is_final_topic(Topic) -> Result when
+    Topic :: topic(),
+    Result :: {boolean(), Words},
+    Words :: 'undefined' | nonempty_list().
+
+is_final_topic(<<"*">>) -> {true, undefined};
+is_final_topic(Topic) ->
+    case binary:match(Topic, [<<"*">>,<<"!">>]) of
+        nomatch -> {true, undefined};
+        _ -> {false, split_topic(Topic)}
+    end.
+    
+% @doc split binary topic to the list
+% binary:split/2 doesn't work well if contain pattern like .*
+-spec split_topic(Key) -> Result when
+    Key :: binary(),
+    Result :: nonempty_list().
+
+split_topic(Bin) ->	
+    split_topic(Bin, [], []).
+split_topic(<<>>, WAcc, Result) ->
+    lists:reverse([lists:reverse(WAcc)|Result]);
+split_topic(<<2#00101110:8, Rest/binary>>, WAcc, Result) ->
+    split_topic(Rest, [], [lists:reverse(WAcc)|Result]);
+split_topic(<<Char:8, Rest/binary>>, WAcc, Result) ->
+    split_topic(Rest, [Char|WAcc], Result);
+split_topic(<<>>, [], []) -> [].
