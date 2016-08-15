@@ -264,7 +264,7 @@ send([], _Message, Acc) -> Acc.
     Target  :: flow_source() | nonempty_list() | binary() | module().
 
 % @doc subscribe current process to all messages from module Module
-sub(Module) when is_binary(Module) -> sub(#flow_source{module = Module, topic = <<"*">>}, {process, self(), info});
+sub(Module) when is_atom(Module) -> sub(#flow_source{module = Module, topic = <<"*">>}, {process, self(), info});
 % @doc subscribe current process to messages with topic Topic from any module
 sub(Topic) when is_binary(Topic) -> sub(#flow_source{module = undefined, topic = Topic}, {process, self(), info});
 % @doc subscribe current process to messages with full-defined FlowSource ([{module, Module}, {topic, Topic}])
@@ -273,7 +273,7 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 % @doc full subscribtion api
 -spec sub(FlowSource,FlowDest) -> ok when
     FlowSource  :: flow_source() | nonempty_list(),
-    FlowDest    :: flow_dest().
+    FlowDest    :: flow_dest() | pid() | atom().
 
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when 
         is_atom(Module),
