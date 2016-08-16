@@ -15,7 +15,6 @@
 -type method() :: 'info' | 'cast' | 'call'.
 -type id() :: {neg_integer(), pos_integer()}.
 -type etsname() :: atom().
--type matchspec() :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
 -type desttype() :: 'process' | 'poolboy'.
 
 % only for cache for final topics (generated with module name)
