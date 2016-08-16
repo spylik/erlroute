@@ -1,14 +1,9 @@
 language: erlang
-install: 
-  - pip install codecov
+install: "sudo pip install codecov"
 script: 
   - make
-  - make dialyze
   - make tests COVER=1
 otp_release:
-  - 19.0
   - 18.3
-sudo: false
 
-after_success:
-  - codecov
+after_success: "escript ./deps/covertool/ebin/covertool.beam -cover ./eunit.coverdata -output cobertura.xml -appname erlroute -src ./src && codecov"
