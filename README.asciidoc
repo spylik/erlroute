@@ -1,5 +1,4 @@
-image:https://api.travis-ci.org/spylik/erlroute.svg?branch=develop[title="Build Status", link="https://travis-ci.org/spylik/erlroute"] image:https://coveralls.io/repos/github/spylik/erlroute/badge.svg?branch=develop[title="Test coverage", link="https://coveralls.io/github/spylik/erlroute?branch=develop"]
-
+image:https://api.travis-ci.org/spylik/erlroute.svg?branch=develop[title="Build Status", link="https://travis-ci.org/spylik/erlroute"] image:https://coveralls.io/repos/github/spylik/erlroute/badge.svg?branch=develop[title="Test coverage", link="https://coveralls.io/github/spylik/erlroute?branch=develop"] image:https://codecov.io/gh/spylik/erlroute/branch/develop/graph/badge.svg[title="Codecov", link="https://codecov.io/gh/spylik/erlroute"]
 = Erlroute
 
 Erlroute is the simple message router designed for http://www.jpaulmorrison.com/fbp/index.shtml[Flow Based Programming paradigm^].

@@ -1,4 +1,6 @@
 language: erlang
+install: 
+  - pip install codecov
 script: 
   - make
   - make dialyze
@@ -9,4 +11,4 @@ otp_release:
 sudo: false
 
 after_success:
-  - make sendcoverreport
+  - codecov
