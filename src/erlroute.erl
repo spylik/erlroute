@@ -11,7 +11,6 @@
 -endif.
 
 -include("erlroute.hrl").
-
 % gen server is here
 -behaviour(gen_server).
 
@@ -286,6 +285,14 @@ sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, 
 sub(FlowSource, FlowDest) when is_pid(FlowDest) orelse is_atom(FlowDest) ->
     sub(FlowSource, {process, FlowDest, info});
 
+% when FlowSource is_atom()
+sub(FlowSource, FlowDest) when is_atom(FlowSource) ->
+    sub(#flow_source{module = FlowSource}, FlowDest);
+
+% when FlowSource is_binary()
+sub(FlowSource, FlowDest) when is_binary(FlowSource) ->
+    sub(#flow_source{topic = FlowSource}, FlowDest);
+
 % when FlowSource is_list 
 sub(FlowSource, FlowDest) when is_list(FlowSource) ->
     sub(#flow_source{
@@ -298,6 +305,7 @@ sub(FlowSource, FlowDest) when is_list(FlowSource) ->
                 {topic, Data} -> Data 
             end
         }, FlowDest).
+
 
 -spec subscribe(FlowSource,FlowDest) -> ok when
     FlowSource  ::  flow_source() | nonempty_list(),
@@ -418,9 +426,9 @@ route_table_must_present(EtsName) ->
                 {read_concurrency, true}, 
                 {keypos, #complete_routes.topic}, 
                 named_table
-            ]);
+            ]), EtsName;
        _ ->
-           ok
+           EtsName
    end.
 
 % @doc check is this topic in final condition or not.
