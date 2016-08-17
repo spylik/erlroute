@@ -417,12 +417,12 @@ generate_parametrized_routing_name(Module) when is_atom(Module)->
 % @doc Check if ets routing table is present, on falure - let's create it 
 -spec route_table_must_present (EtsName) -> Result when
       EtsName   ::  atom(),
-      Result    ::  ets:tid() | ok.
+      Result    ::  atom().
 
 route_table_must_present(EtsName) ->
    case ets:info(EtsName, size) of
        undefined -> 
-            ets:new(EtsName, [bag, protected, 
+            _Tid = ets:new(EtsName, [bag, protected, 
                 {read_concurrency, true}, 
                 {keypos, #complete_routes.topic}, 
                 named_table
