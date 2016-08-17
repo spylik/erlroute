@@ -11,7 +11,6 @@
 -endif.
 
 -include("erlroute.hrl").
-
 % gen server is here
 -behaviour(gen_server).
 
@@ -427,9 +426,9 @@ route_table_must_present(EtsName) ->
                 {read_concurrency, true}, 
                 {keypos, #complete_routes.topic}, 
                 named_table
-            ]);
+            ]), EtsName;
        _ ->
-           ok
+           EtsName
    end.
 
 % @doc check is this topic in final condition or not.
