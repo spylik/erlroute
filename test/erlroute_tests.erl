@@ -52,7 +52,7 @@ otp_test_() ->
                 end},
                 {<<"Application able to stop via ?TESTSERVER:stop()">>,
                     fun() ->
-                        ?assertExit({normal,{gen_server,call,[?TESTSERVER,stop]}}, ?TESTSERVER:stop()),
+                        ?assertEqual(ok, ?TESTSERVER:stop(sync)),
                         ?assertEqual(
                             false,
                             is_pid(whereis(?TESTSERVER))
@@ -61,7 +61,7 @@ otp_test_() ->
                 {<<"Application able to start and stop via ?TESTSERVER:start_link() / ?TESTSERVER:stop(sync)">>,
                     fun() ->
                         ?TESTSERVER:start_link(),
-                        ?assertExit({normal,{gen_server,call,[?TESTSERVER,stop]}}, ?TESTSERVER:stop(sync)),
+                        ?assertEqual(ok, ?TESTSERVER:stop(sync)),
                         ?assertEqual(
                             false,
                             is_pid(whereis(?TESTSERVER))
