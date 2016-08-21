@@ -164,8 +164,20 @@ handle_info(Msg, State) ->
 
 %-----------end of handle_info-------------
 
+-spec terminate(Reason, State) -> term() when
+    Reason :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
+    State :: term().
+
 terminate(Reason, State) ->
     {noreply, Reason, State}.
+
+-spec code_change(OldVsn, State, Extra) -> Result when
+    OldVsn :: Vsn | {down, Vsn},
+    Vsn :: term(),
+    State :: term(),
+    Extra :: term(),
+    Result :: {ok, NewState},
+    NewState :: term().
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
