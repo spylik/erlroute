@@ -1,9 +1,14 @@
 {application,erlroute,
-             [{description,"Dynamic direct message routing in Erlang"},
-              {vsn,"0.1.1"},
-              {id,"git"},
-              {modules,[]},
-              {registered,[erlroute]},
-              {applications,[kernel,stdlib]},
-              {mod,{erlroute_app,[]}},
-              {env,[]}]}.
+    [
+        {description,"Simple pub/sub message router"},
+        {vsn,"0.1.3"},
+        {id,"git"},
+        {modules,[]},
+        {registered,[erlroute]},
+        {applications,[
+            kernel,
+            stdlib
+        ]},
+        {mod,{erlroute_app,[]}},
+        {env,[]}
+    ]}.
