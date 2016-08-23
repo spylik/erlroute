@@ -1,6 +1,6 @@
 {application,erlroute,
              [{description,"Dynamic direct message routing in Erlang"},
-              {vsn,"0.1.0"},
+              {vsn,"0.1.1"},
               {id,"git"},
               {modules,[]},
               {registered,[erlroute]},
