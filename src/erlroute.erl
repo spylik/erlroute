@@ -132,14 +132,6 @@ handle_cast({new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhil
     _ = post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync),
     {noreply, State};
 
-handle_cast({subscribe, FlowSource, FlowDest}, State) ->
-    _ = subscribe(FlowSource,FlowDest),
-    {noreply, State};
-
-handle_cast({unsubscribe, FlowSource, FlowDest}, State) ->
-    _ = unsubscribe(FlowSource,FlowDest),
-    {noreply, State};
-
 handle_cast(stop, State) ->
     {stop, normal, State};
 
