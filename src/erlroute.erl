@@ -68,14 +68,14 @@ stop(async) ->
 init([]) ->
     _ = ets:new('$erlroute_topics', [
             bag,
-            protected,
+            public, % public for support full sync pub
             {read_concurrency, true}, % todo: test does it affect performance for writes?
             {keypos, #topics.topic},
             named_table
         ]),
     _ = ets:new('$erlroute_global_sub', [
             bag,
-            protected,
+            public, % public for support full sync pub,
             {read_concurrency, true}, % todo: test doesrt affect performance for writes?
             {keypos, #subscribers_by_topic_only.topic},
             named_table
