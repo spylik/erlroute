@@ -18,9 +18,7 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 -spec init([]) -> Result when
-    Result :: {ok,{RestartStrategy, Childrens}},
-    RestartStrategy :: supervisor:strategy(),
-    Childrens :: [supervisor:child_spec()].
+    Result :: {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
 
 init([]) ->
     RestartStrategy = {                        % Rules for restarting supervisor
