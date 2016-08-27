@@ -11,17 +11,21 @@
 -endif.
 
 -include("erlroute.hrl").
-% gen server is here
+
 -behaviour(gen_server).
 
-% gen_server api
+% export standart gen_server api
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
-% public api 
+% export start/stop api 
 -export([
         start_link/0,
-        stop/0, stop/1,
+        stop/0, stop/1
+    ]).
+
+% export our custom api
+-export([
         pub/5,
         full_async_pub/5,
         full_sync_pub/5,
@@ -34,31 +38,44 @@
 
 % ----------------------------- gen_server part --------------------------------
 
-% star/stop api
+% @doc start api
+-spec start_link() -> Result when
+    Result :: {ok,Pid} | ignore | {error,Error},
+    Pid :: pid(),
+    Error :: {already_started,Pid} | term().
+
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+% @doc simplified stop api. Defaul is sync call gen_server:stop
+-spec stop() -> ok.
+
 stop() ->
     stop(sync).
+
+% @doc async/sync stop
+-spec stop(Type) -> ok when
+    Type :: 'sync' | 'async'.
+
 stop(sync) ->
-    gen_server:call(?SERVER, stop);
+    gen_server:stop(?SERVER);
 stop(async) ->
     gen_server:cast(?SERVER, stop).
 
-% we going to create ETS tables for dynamic routing rules in init section
+% @doc gen_server init. We going to create ETS tables for dynamic routing rules in init section
 -spec init([]) -> {ok, undefined}.
 
 init([]) ->
     _ = ets:new('$erlroute_topics', [
             bag,
-            protected,
+            public, % public for support full sync pub
             {read_concurrency, true}, % todo: test does it affect performance for writes?
             {keypos, #topics.topic},
             named_table
         ]),
     _ = ets:new('$erlroute_global_sub', [
             bag,
-            protected,
+            public, % public for support full sync pub,
             {read_concurrency, true}, % todo: test doesrt affect performance for writes?
             {keypos, #subscribers_by_topic_only.topic},
             named_table
@@ -68,6 +85,16 @@ init([]) ->
 
 %--------------handle_call-----------------
 
+% @doc callbacks for gen_server handle_call.
+-spec handle_call(Message, From, State) -> Result when
+    Message :: SubMsg | UnsubMsg,
+    SubMsg :: {'subscribe', flow_source(), flow_dest()},
+    UnsubMsg :: {'unsubscribe', flow_source(), flow_dest()},
+    From :: {pid(), Tag},
+    Tag :: term(),
+    State :: term(),
+    Result :: {reply, Result, State}.
+
 handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
     Result = subscribe(FlowSource, FlowDest),
     {reply, Result, State};
@@ -76,9 +103,7 @@ handle_call({unsubscribe, FlowSource, FlowDest}, _From, State) ->
     unsubscribe(FlowSource, FlowDest),
     {reply, ok, State};
 
-handle_call(stop, _From, State) ->
-    {stop, normal, State};
-
+% @doc unspec case for unknown messages
 handle_call(Msg, _From, State) ->
     error_logger:warning_msg("we are in undefined handle_call with message ~p\n",[Msg]),
     {reply, ok, State}.
@@ -87,16 +112,24 @@ handle_call(Msg, _From, State) ->
 
 %--------------handle_cast-----------------
 
+% @doc callbacks for gen_server handle_cast.
+-spec handle_cast(Message, State) -> Result when
+    Message         :: SubMsg | UnsubMsg | NewMsg,
+    SubMsg          :: {'subscribe', flow_source(), flow_dest()},
+    UnsubMsg        :: {'unsubscribe', flow_source(), flow_dest()},
+    NewMsg          :: {'new_msg', Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync},
+    WhoGetWhileSync :: [] | [proc()],
+    Module          :: module(),
+    Process         :: proc(),
+    Line            :: pos_integer(),
+    Topic           :: binary(),
+    Message         :: term(),
+    EtsName         :: atom(),
+    State           :: term(),
+    Result          :: {noreply, State}.
+
 handle_cast({new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}, State) ->
     _ = post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync),
-    {noreply, State};
-
-handle_cast({subscribe, FlowSource, FlowDest}, State) ->
-    _ = subscribe(FlowSource,FlowDest),
-    {noreply, State};
-
-handle_cast({unsubscribe, FlowSource, FlowDest}, State) ->
-    _ = unsubscribe(FlowSource,FlowDest),
     {noreply, State};
 
 handle_cast(stop, State) ->
@@ -110,14 +143,33 @@ handle_cast(Msg, State) ->
 
 %--------------handle_info-----------------
 
+% @doc callbacks for gen_server handle_info.
+-spec handle_info(Message, State) -> Result when
+    Message :: term(),
+    State   :: term(),
+    Result  :: {noreply, State}.
+
+% @doc case for unknown messages
 handle_info(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle_info with message ~p\n",[Msg]),
     {noreply, State}.
 
 %-----------end of handle_info-------------
 
+-spec terminate(Reason, State) -> term() when
+    Reason :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
+    State :: term().
+
 terminate(Reason, State) ->
     {noreply, Reason, State}.
+
+-spec code_change(OldVsn, State, Extra) -> Result when
+    OldVsn :: Vsn | {down, Vsn},
+    Vsn :: term(),
+    State :: term(),
+    Extra :: term(),
+    Result :: {ok, NewState},
+    NewState :: term().
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.

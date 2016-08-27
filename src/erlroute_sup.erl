@@ -11,8 +11,14 @@
 
 -define(SERVER, ?MODULE).
 
+-spec start_link() -> Result when
+    Result :: supervisor:startlink_ret().
+
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+
+-spec init([]) -> Result when
+    Result :: {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
 
 init([]) ->
     RestartStrategy = {                        % Rules for restarting supervisor
