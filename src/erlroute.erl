@@ -121,7 +121,7 @@ handle_call(Msg, _From, State) ->
     SubMsg          :: {'subscribe', flow_source(), flow_dest()},
     UnsubMsg        :: {'unsubscribe', flow_source(), flow_dest()},
     NewMsg          :: {'new_msg', Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync},
-    WhoGetWhileSync :: [] | [proc()],
+    WhoGetWhileSync :: pubresult(),
     Module          :: module(),
     Process         :: proc(),
     Line            :: pos_integer(),
@@ -206,7 +206,7 @@ code_change(_OldVsn, State, _Extra) ->
 % shortcut (should use parse transform better than pub/1)
 -spec pub(Message) -> Result when
     Message ::  term(),
-    Result  ::  [] | [proc()].
+    Result  ::  pubresult().
 
 pub(Message) ->
     Module = ?MODULE,
@@ -218,7 +218,7 @@ pub(Message) ->
 -spec pub(Topic, Message) -> Result when
     Message ::  term(),
     Topic   ::  binary(),
-    Result  ::  [] | [proc()].
+    Result  ::  pubresult().
 
 pub(Topic, Message) ->
     Module = ?MODULE,
@@ -232,7 +232,7 @@ pub(Topic, Message) ->
     Line    ::  pos_integer(),
     Topic   ::  binary(),
     Message ::  term(),
-    Result  ::  [] | [proc()].
+    Result  ::  pubresult().
 
 pub(Module, Process, Line, Topic, Message) ->
     pub(Module, Process, Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
@@ -256,7 +256,7 @@ full_async_pub(Module, Process, Line, Topic, Message) ->
     Line    ::  pos_integer(),
     Topic   ::  binary(),
     Message ::  term(),
-    Result  ::  [] | [proc()].
+    Result  ::  pubresult().
 
 full_sync_pub(Module, Process, Line, Topic, Message) ->
     pub(Module, Process, Line, Topic, Message, sync, generate_complete_routing_name(Module)).
@@ -270,7 +270,7 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
     Message ::  term(),
     PubType ::  pubtype(),
     EtsName ::  atom(),
-    Result  ::  [] | [proc()].
+    Result  ::  pubresult().
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),

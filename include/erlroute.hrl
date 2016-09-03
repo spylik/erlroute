@@ -7,7 +7,8 @@
 
 -export_type([
         flow_source/0,
-        flow_dest/0
+        flow_dest/0,
+        pubresult/0
     ]).
 
 -type pubtype() :: 'sync' | 'async' | 'hybrid'.
@@ -17,6 +18,7 @@
 -type id() :: {neg_integer(), pos_integer()}.
 -type etsname() :: atom().
 -type desttype() :: 'process' | 'poolboy'.
+-type pubresult() :: [] | [proc()].
 
 % only for cache for final topics (generated with module name)
 -record(complete_routes, {
