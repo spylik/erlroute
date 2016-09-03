@@ -26,7 +26,10 @@
 
 % export our custom api
 -export([
-        pub/5,
+        pub/1,  % translate to pub/7
+        pub/2,  % translate to pub/7
+        pub/5,  % translate to pub/7
+        pub/7,
         full_async_pub/5,
         full_sync_pub/5,
         sub/2,
@@ -118,7 +121,7 @@ handle_call(Msg, _From, State) ->
     SubMsg          :: {'subscribe', flow_source(), flow_dest()},
     UnsubMsg        :: {'unsubscribe', flow_source(), flow_dest()},
     NewMsg          :: {'new_msg', Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync},
-    WhoGetWhileSync :: [] | [proc()],
+    WhoGetWhileSync :: pubresult(),
     Module          :: module(),
     Process         :: proc(),
     Line            :: pos_integer(),
@@ -199,6 +202,29 @@ code_change(_OldVsn, State, _Extra) ->
 % - for async it always return empty list.
 % - for sync it return full list of destination processes where erlroute actually send message.
 
+
+% shortcut (should use parse transform better than pub/1)
+-spec pub(Message) -> Result when
+    Message ::  term(),
+    Result  ::  pubresult().
+
+pub(Message) ->
+    Module = ?MODULE,
+    Line = ?LINE,
+    Topic = list_to_binary(lists:concat([Module,",",Line])),
+    pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)). 
+
+% shortcut (should use parse transform better than pub/2)
+-spec pub(Topic, Message) -> Result when
+    Message ::  term(),
+    Topic   ::  binary(),
+    Result  ::  pubresult().
+
+pub(Topic, Message) ->
+    Module = ?MODULE,
+    Line = ?LINE,
+    pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
+
 % hybrid
 -spec pub(Module, Process, Line, Topic, Message) -> Result when
     Module  ::  module(),
@@ -206,10 +232,10 @@ code_change(_OldVsn, State, _Extra) ->
     Line    ::  pos_integer(),
     Topic   ::  binary(),
     Message ::  term(),
-    Result  ::  [] | [proc()].
+    Result  ::  pubresult().
 
 pub(Module, Process, Line, Topic, Message) ->
-    pub(Module, Process, Line, Topic, Message, hybrid, generate_complete_routing_name(Module)).
+    pub(Module, Process, Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
 
 % full_async
 -spec full_async_pub(Module, Process, Line, Topic, Message) -> Result when
@@ -230,12 +256,22 @@ full_async_pub(Module, Process, Line, Topic, Message) ->
     Line    ::  pos_integer(),
     Topic   ::  binary(),
     Message ::  term(),
-    Result  ::  [] | [proc()].
+    Result  ::  pubresult().
 
 full_sync_pub(Module, Process, Line, Topic, Message) ->
     pub(Module, Process, Line, Topic, Message, sync, generate_complete_routing_name(Module)).
 
-% do parse_transfrorm to pub/7 wherever it possible to avoid atom construction during runtime
+% @doc full parameter pub
+-spec pub(Module, Process, Line, Topic, Message, PubType, EtsName) -> Result when
+    Module  ::  module(),
+    Process ::  proc(),
+    Line    ::  pos_integer(),
+    Topic   ::  binary(),
+    Message ::  term(),
+    PubType ::  pubtype(),
+    EtsName ::  atom(),
+    Result  ::  pubresult().
+
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
     gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}), 

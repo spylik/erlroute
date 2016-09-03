@@ -7,15 +7,18 @@
 
 -export_type([
         flow_source/0,
-        flow_dest/0
+        flow_dest/0,
+        pubresult/0
     ]).
 
+-type pubtype() :: 'sync' | 'async' | 'hybrid'.
 -type topic() :: binary().
 -type proc() :: pid() | atom().
 -type method() :: 'info' | 'cast' | 'call'.
 -type id() :: {neg_integer(), pos_integer()}.
 -type etsname() :: atom().
 -type desttype() :: 'process' | 'poolboy'.
+-type pubresult() :: [] | [proc()].
 
 % only for cache for final topics (generated with module name)
 -record(complete_routes, {
@@ -57,10 +60,10 @@
 
 -record(flow_source, {
         module :: 'undefined' | module(),
-        topic = <<"*">> :: binary()
+        topic = <<"*">> :: topic()
     }).
 
--type flow_source() :: #flow_source{}.
+-type flow_source() :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
 -type flow_dest() :: {process, proc(), method()} | {poolboy, atom(), method()}.
 
 
