@@ -10,6 +10,7 @@
         flow_dest/0
     ]).
 
+-type pubtype() :: 'sync' | 'async' | 'hybrid'.
 -type topic() :: binary().
 -type proc() :: pid() | atom().
 -type method() :: 'info' | 'cast' | 'call'.
@@ -57,10 +58,10 @@
 
 -record(flow_source, {
         module :: 'undefined' | module(),
-        topic = <<"*">> :: binary()
+        topic = <<"*">> :: topic()
     }).
 
--type flow_source() :: #flow_source{}.
+-type flow_source() :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
 -type flow_dest() :: {process, proc(), method()} | {poolboy, atom(), method()}.
 
 
