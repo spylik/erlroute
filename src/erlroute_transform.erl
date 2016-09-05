@@ -88,10 +88,10 @@ try_transform({call,Line,
         Output;
 
 
-% transform 
-%   erlroute:pub(Topic,Message) 
+% @doc transform 
+%   erlroute:pub(Topic, Message) 
 % to 
-%   erlroute:pub(Module, Pid, Line, Topic, Message)
+%   erlroute:pub(Module, Pid, Line, Topic, Message, hybrid, EtsName)
 try_transform({call,Line,
         {remote,Line,
             {atom,Line,erlroute},{atom,Line,pub}
@@ -101,19 +101,22 @@ try_transform({call,Line,
             Msg
         ]
     }, Module, _Name, _Arity) ->
+        EtsName = erlroute:generate_complete_routing_name(Module),
         Output = {call,Line,
             {remote,Line,
                 {atom,Line,erlroute},{atom,Line,pub}
             },
             [
-                {atom,Line,Module},
+                {atom, Line,Module},
                 {call, Line, {atom, Line ,self}, []},
                 {integer, Line, Line},
                 Topic,
-                Msg 
+                Msg,
+                {atom, Line, hybrid},
+                {atom, Line, EtsName}
             ]
         },
- %       io:format("output is ~p",[Output]),
+        io:format("output is ~p",[Output]),
         Output;
 
 try_transform(BodyElement, _Module, _Name, _Arity) ->
