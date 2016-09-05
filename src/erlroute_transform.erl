@@ -116,7 +116,7 @@ try_transform({call,Line,
                 {atom, Line, EtsName}
             ]
         },
-        io:format("output is ~p",[Output]),
+%        io:format("output is ~p",[Output]),
         Output;
 
 try_transform(BodyElement, _Module, _Name, _Arity) ->
