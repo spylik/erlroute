@@ -559,7 +559,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         erlroute:sub(Module, {DestType, Dest, Method}),
                         MS = [{
                                 #complete_routes{
-                                    topic = <<"*">>, 
+                                    topic = Topic, 
                                     dest_type = DestType,
                                     dest = Dest,
                                     method = Method,
@@ -1085,61 +1085,50 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
          }
      }.
 
-parse_transform_tes() ->
+parse_transform_test_() ->
     {setup,
         fun setup_start/0,
         {inparallel, 
              [
                 {<<"pub/1 should transform to pub/5 (in module clause) and consumer able to get message">>,
                     fun() ->
-                        Type = by_pid,
-                        Source = self(),
+                        % source 
+                        Module = ?MODULE,
+                        %SendTopic = <<"erlroute_tests.14">>,
                         SubTopic = <<"erlroute_tests.14">>,
-                        Pid = spawn_link(
-                            fun() ->
-                                   receive
-                                       {From, Ref} -> 
-                                           From ! {got, Ref}
-                                   after 50 -> false
-                                   end
-                            end),
-                        erlroute:sub(Type, Source, SubTopic, Pid),
+                        % dest
+                        DestType = process,
+                        Dest = tutils:spawn_wait_loop(self()),
+                        Method = info,
+                
+                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
                         Msg = make_ref(),
                         timer:sleep(5),
-                        publish({self(), Msg}),
-                        Ack = 
-                            receive
-                                {got, Msg} -> Msg
-                            after 50 -> false
-                            end,
-                        ?assertEqual(Msg, Ack)
+                        publish(Msg),
+                        Ack = tutils:recieve_loop(),
+                        ?assertEqual([Msg], Ack),
+                        Dest ! stop
                 end},
 
-                {<<"pub/2 should transform to pub/5 (in module clause) and consumer able to get message">>,
-                    fun() ->
-                        Type = by_pid,
-                        Source = self(),
-                        SendTopic = <<"test.topic">>,
-                        SubTopic = <<"*">>,
-                        Pid = spawn_link(
-                            fun() ->
-                                   receive
-                                       {From, Ref} -> 
-                                           From ! {got, Ref}
-                                   after 50 -> false
-                                   end
-                            end),
-                        erlroute:sub(Type, Source, SubTopic, Pid),
+               {<<"pub/2 should transform to pub/5 (in module clause) and consumer able to get message">>,
+                   fun() ->
+                        % source 
+                        Module = ?MODULE,
+                        SendTopic = <<"erlroute_tests.15">>,
+                        SubTopic = <<"erlroute_tests.15">>,
+                        % dest
+                        DestType = process,
+                        Dest = tutils:spawn_wait_loop(self()),
+                        Method = info,
+                
+                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
                         Msg = make_ref(),
                         timer:sleep(5),
-                        publish(SendTopic, {self(), Msg}),
-                        Ack = 
-                            receive
-                                {got, Msg} -> Msg
-                            after 50 -> false
-                            end,
-                        ?assertEqual(Msg, Ack)
-                end}
+                        publish(SendTopic, Msg),
+                        Ack = tutils:recieve_loop(),
+                        ?assertEqual([Msg], Ack),
+                        Dest ! stop
+               end}
             ]
         }
     }.

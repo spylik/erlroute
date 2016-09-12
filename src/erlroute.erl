@@ -33,7 +33,8 @@
         full_async_pub/5,
         full_sync_pub/5,
         sub/2,
-        sub/1
+        sub/1,
+        generate_complete_routing_name/1 % export support function for parse_transform
     ]).
 
 % we will use ?MODULE as servername
@@ -212,6 +213,7 @@ pub(Message) ->
     Module = ?MODULE,
     Line = ?LINE,
     Topic = list_to_binary(lists:concat([Module,",",Line])),
+    error_logger:warning_msg("Attempt to use pub/1 without parse_transform. ?MODULE, ?LINE and Topic will be wrong."),
     pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)). 
 
 % shortcut (should use parse transform better than pub/2)
@@ -223,6 +225,7 @@ pub(Message) ->
 pub(Topic, Message) ->
     Module = ?MODULE,
     Line = ?LINE,
+    error_logger:warning_msg("Attempt to use pub/2 without parse_transform. ?MODULE and ?LINE will be wrong."),
     pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
 
 % hybrid
@@ -235,6 +238,7 @@ pub(Topic, Message) ->
     Result  ::  pubresult().
 
 pub(Module, Process, Line, Topic, Message) ->
+    error_logger:warning_msg("Attempt to use pub/5 without parse_transform."),
     pub(Module, Process, Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
 
 % full_async
