@@ -1,7 +1,7 @@
 {application,erlroute,
     [
         {description,"Simple pub/sub message router"},
-        {vsn,"0.1.14"},
+        {vsn,"0.1.15"},
         {id,"git"},
         {modules,[]},
         {registered,[erlroute]},

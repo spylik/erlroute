@@ -46,10 +46,11 @@
     Result  ::  [erl_parse:abstract_form() | erl_parse:form_info()].
 
 parse_transform(Forms, _Options) ->
+    put(module, parse_trans:get_module(Forms)),
     parse_trans:plain_transform(fun do_transform/1, Forms).
 
 do_transform(?pub1) ->
-    Module = test,
+    Module = get(module),
     EtsName = erlroute:generate_complete_routing_name(Module),
     Topic = lists:concat([Module,".",Line]),
     Output = {call,Line,
@@ -70,7 +71,7 @@ do_transform(?pub1) ->
     Output;
 
 do_transform(?pub2) ->
-    Module = test,
+    Module = get(module),
     EtsName = erlroute:generate_complete_routing_name(Module),
     Output = {call,Line,
         {remote,Line,
