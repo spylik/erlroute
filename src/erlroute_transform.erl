@@ -13,31 +13,6 @@
     -compile(export_all).
 -endif.
 
-% erlroute:pub/1
--define(pub1, 
-    {call,Line,
-        {remote,Line,
-            {atom,Line,erlroute},{atom,Line,pub}
-        },
-        [
-            Msg
-        ]
-    }
-).
-
-% erlroute:pub/2
--define(pub2, 
-    {call,Line,
-        {remote,Line,
-            {atom,Line,erlroute},{atom,Line,pub}
-        },
-        [
-            Topic,
-            Msg
-        ]
-    }
-).
-
 -export([parse_transform/2]).
 
 -spec parse_transform(AST, Options) -> Result when
@@ -49,7 +24,16 @@ parse_transform(Forms, _Options) ->
     put(module, parse_trans:get_module(Forms)),
     parse_trans:plain_transform(fun do_transform/1, Forms).
 
-do_transform(?pub1) ->
+% @doc transform erlroute:pub/1
+do_transform(
+    {call,Line,
+        {remote,Line,
+            {atom,Line,erlroute},{atom,Line,pub}
+        },
+        [
+            Msg
+        ]
+    }) ->
     Module = get(module),
     EtsName = erlroute:generate_complete_routing_name(Module),
     Topic = lists:concat([Module,".",Line]),
@@ -67,10 +51,20 @@ do_transform(?pub1) ->
             {atom, Line, EtsName}
         ]
     },
-    %io:format("output is ~p",[Output]),
     Output;
 
-do_transform(?pub2) ->
+% @doc transform erlroute:pub/2
+do_transform(
+    {call,Line,
+        {remote,Line,
+            {atom,Line,erlroute},{atom,Line,pub}
+        },
+        [
+            Topic,
+            Msg
+        ]
+    }
+) ->
     Module = get(module),
     EtsName = erlroute:generate_complete_routing_name(Module),
     Output = {call,Line,
@@ -87,6 +81,5 @@ do_transform(?pub2) ->
             {atom, Line, EtsName}
         ]
     },
-    %io:format("output is ~p",[Output]),
     Output;
 do_transform(_) -> continue.
