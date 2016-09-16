@@ -362,7 +362,7 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 
 % @doc full subscribtion api
 -spec sub(FlowSource,FlowDest) -> ok when
-    FlowSource  :: flow_source() | nonempty_list(),
+    FlowSource  :: flow_source() | nonempty_list() | binary() | module(),
     FlowDest    :: flow_dest() | pid() | atom().
 
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when 
