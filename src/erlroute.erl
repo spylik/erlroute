@@ -323,7 +323,6 @@ send([#complete_routes{dest_type = 'process', dest = Process, method = Method}|T
 send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|T], Message, Acc) ->
     NewAcc = try poolboy:checkout(PoolName) of
         Worker when is_pid(Worker) -> 
-            gen_server:cast(Worker, Message),
             case Method of
                 info -> Worker ! Message;
                 cast -> gen_server:cast(Worker, Message);
