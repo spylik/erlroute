@@ -816,7 +816,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         erlroute:pub(Module, self(), ?LINE, SendTopic1, Msg1),
                         erlroute:pub(Module, self(), ?LINE, SendTopic2, Msg2),
                         Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg2, Msg1], Ack),
+                        ?assertEqual([Msg1, Msg2], Ack),
                         Dest ! stop
                 end},
                 {<<"Messages from another module should do not delivered to another module subscribers">>,
@@ -843,7 +843,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         erlroute:pub(Module1, self(), ?LINE, SendTopic2, Msg2),
                         erlroute:pub(Module2, self(), ?LINE, SendTopic3, Msg3),
                         Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg2, Msg1], Ack),
+                        ?assertEqual([Msg1,Msg2], Ack),
                         Dest ! stop
                 end},
                 {<<"Should have entry in ets '$erlroute_global_sub' after subscribe to specified topic globally">>, 

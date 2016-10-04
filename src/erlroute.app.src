@@ -1,14 +1,9 @@
 {application,erlroute,
-    [
-        {description,"Simple pub/sub message router"},
-        {vsn,"0.1.16"},
-        {id,"git"},
-        {modules,[]},
-        {registered,[erlroute]},
-        {applications,[
-            kernel,
-            stdlib
-        ]},
-        {mod,{erlroute_app,[]}},
-        {env,[]}
-    ]}.
+             [{description,"Simple pub/sub message router"},
+              {vsn,"0.1.16"},
+              {id,"git"},
+              {modules,[]},
+              {registered,[erlroute]},
+              {applications,[kernel,stdlib]},
+              {mod,{erlroute_app,[]}},
+              {env,[]}]}.

@@ -11,6 +11,7 @@ DEPS = parse_trans
 TEST_DEPS = teaser poolboy
 
 ifeq ($(USER),travis)
+	ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +warn_missing_spec -Werror
     TEST_DEPS += covertool
 	dep_covertool = git https://github.com/idubrov/covertool
 endif
