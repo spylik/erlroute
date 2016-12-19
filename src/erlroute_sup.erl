@@ -12,7 +12,7 @@
 -define(SERVER, ?MODULE).
 
 -spec start_link() -> Result when
-    Result :: supervisor:startlink_ret().
+    Result :: 'ignore' | {'error',_} | {'ok',pid()}.
 
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).

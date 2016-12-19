@@ -8,7 +8,8 @@
 -export_type([
         flow_source/0,
         flow_dest/0,
-        pubresult/0
+        pubresult/0,
+        topic/0
     ]).
 
 -type pubtype() :: 'sync' | 'async' | 'hybrid'.
