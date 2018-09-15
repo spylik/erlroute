@@ -18,7 +18,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
-% export start/stop api 
+% export start/stop api
 -export([
         start_link/0,
         stop/0, stop/1
@@ -34,11 +34,22 @@
         full_sync_pub/5,
         sub/2,
         sub/1,
+        unsub/2,
+        unsub/1,
         generate_complete_routing_name/1 % export support function for parse_transform
+    ]).
+
+% export types
+-export_type([
+        flow_source/0,
+        flow_dest/0,
+        pubresult/0,
+        topic/0
     ]).
 
 % we will use ?MODULE as servername
 -define(SERVER, ?MODULE).
+-define(METHODS, ['info', 'cast', 'call']).
 
 % ----------------------------- gen_server part --------------------------------
 
@@ -214,7 +225,7 @@ pub(Message) ->
     Line = ?LINE,
     Topic = list_to_binary(lists:concat([Module,",",Line])),
     error_logger:warning_msg("Attempt to use pub/1 without parse_transform. ?MODULE, ?LINE and Topic will be wrong."),
-    pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)). 
+    pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
 
 % shortcut (should use parse transform better than pub/2)
 -spec pub(Topic, Message) -> Result when
@@ -278,23 +289,23 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}), 
+    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}),
     WhoGetWhileSync;
 pub(Module, Process, Line, Topic, Message, async, EtsName) ->
-    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, []}), 
+    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, []}),
     [];
 pub(Module, Process, Line, Topic, Message, sync, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
     post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync).
 
-% load routing recursion 
+% load routing recursion
 load_routing_and_send(EtsName, Topic, Message, Acc) ->
-    try ets:lookup(EtsName, Topic) of 
-        [] when Topic =/= <<"*">> -> 
+    try ets:lookup(EtsName, Topic) of
+        [] when Topic =/= <<"*">> ->
             load_routing_and_send(EtsName, <<"*">>, Message, Acc);
         [] ->
             Acc;
-        Routes when Topic =/= <<"*">> -> 
+        Routes when Topic =/= <<"*">> ->
             % send to wildcard-topic subscribers
             load_routing_and_send(EtsName, <<"*">>, Message, send(Routes, Message, Acc));
         Routes ->
@@ -313,20 +324,20 @@ load_routing_and_send(EtsName, Topic, Message, Acc) ->
 % sending to standart process
 send([#complete_routes{dest_type = 'process', dest = Process, method = Method}|T], Message, Acc) ->
     case Method of
-        info -> Process ! Message;
-        cast -> gen_server:cast(Process, Message);
-        call -> gen_server:call(Process, Message)
+        'info' -> Process ! Message;
+        'cast' -> gen_server:cast(Process, Message);
+        'call' -> gen_server:call(Process, Message)
     end,
     send(T, Message, [Process|Acc]);
 
 % sending to poolboy pool
 send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|T], Message, Acc) ->
     NewAcc = try poolboy:checkout(PoolName) of
-        Worker when is_pid(Worker) -> 
+        Worker when is_pid(Worker) ->
             case Method of
-                info -> Worker ! Message;
-                cast -> gen_server:cast(Worker, Message);
-                call -> gen_server:call(Worker, Message)
+                'info' -> Worker ! Message;
+                'cast' -> gen_server:cast(Worker, Message);
+                'call' -> gen_server:call(Worker, Message)
             end,
             poolboy:checkin(PoolName, Worker),
             [Worker|Acc];
@@ -364,12 +375,12 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
     FlowSource  :: flow_source() | nonempty_list() | binary() | module(),
     FlowDest    :: flow_dest() | pid() | atom().
 
-sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when 
+sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
         DestType =:= 'process' orelse DestType =:= 'poolboy',
         is_pid(Dest) orelse is_atom(Dest),
-        Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' ->
+        Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' orelse Method =:= 'apply' ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
 % when Dest is pid() or atom
@@ -384,16 +395,16 @@ sub(FlowSource, FlowDest) when is_atom(FlowSource) ->
 sub(FlowSource, FlowDest) when is_binary(FlowSource) ->
     sub(#flow_source{topic = FlowSource}, FlowDest);
 
-% when FlowSource is_list 
+% when FlowSource is_list
 sub(FlowSource, FlowDest) when is_list(FlowSource) ->
     sub(#flow_source{
-            module = case lists:keyfind(module, 1, FlowSource) of 
-                false -> undefined; 
+            module = case lists:keyfind(module, 1, FlowSource) of
+                false -> undefined;
                 {module, Data} -> Data
             end,
-            topic = case lists:keyfind(topic, 1, FlowSource) of 
-                false -> <<"*">>; 
-                {topic, Data} -> Data 
+            topic = case lists:keyfind(topic, 1, FlowSource) of
+                false -> <<"*">>;
+                {topic, Data} -> Data
             end
         }, FlowDest).
 
@@ -416,11 +427,11 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
     _ = case IsFinal of
         true ->
             lists:map(fun(#topics{module = Module}) ->
-                ets:insert(route_table_must_present(generate_complete_routing_name(Module)), 
+                ets:insert(route_table_must_present(generate_complete_routing_name(Module)),
                     #complete_routes{
-                        topic = Topic, 
-                        dest_type = DestType, 
-                        dest = Dest, 
+                        topic = Topic,
+                        dest_type = DestType,
+                        dest = Dest,
                         method = Method,
                         parent_topic = {'$erlroute_global_sub', Topic}
                     }
@@ -428,12 +439,12 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
             end, ets:lookup('$erlroute_topics',Topic));
         false -> todo % implement for parametrized topics
     end,
-    ok; 
+    ok;
 
 % @doc subscribe for specified module
 subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) ->
     {IsFinal, Words} = is_final_topic(Topic),
-    case IsFinal of 
+    case IsFinal of
         true ->
             EtsName = generate_complete_routing_name(Module),
             _ = route_table_must_present(EtsName),
@@ -447,12 +458,56 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
 
 % ================================ end of sub part =============================
 % ----------------------------------- unsub part -------------------------------
+-spec unsub(Target) -> ok when
+    Target  :: flow_source() | nonempty_list() | binary() | module().
+
+% @doc unsubscribe current process from all messages from module Module
+unsub(Module) when is_atom(Module) -> unsub(#flow_source{module = Module, topic = <<"*">>}, {process, self(), 'undefined'});
+% @doc subscribe current process from messages with topic Topic from any module
+unsub(Topic) when is_binary(Topic) -> unsub(#flow_source{module = undefined, topic = Topic}, {process, self(), 'undefined'});
+% @doc unsubscribe current process from messages with full-defined FlowSource ([{module, Module}, {topic, Topic}])
+unsub(FlowSource) when is_list(FlowSource) -> unsub(FlowSource, {process, self(), 'undefined'}).
+
+% @doc full subscribtion api
+-spec unsub(FlowSource, FlowDest) -> ok when
+    FlowSource  :: flow_source() | nonempty_list() | binary() | module(),
+    FlowDest    :: flow_dest() | pid() |  | atom().
+
+unsub(FlowSource = #flow_source{module = Module, topic = Topic}, {{DestType, true}, {Dest, true}, {Methods, true}}) when
+        is_atom(Module),
+        is_binary(Topic) ->
+    gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
+
+% todo: log error, throw error
+unsub(FlowSource, {{DestType, false}, _Dest, _Methods}) ->
+    {error, 'wrong_dest_type'};
+
+unsub(FlowSource, {_DestType, {Dest, false} _Methods}) ->
+    {error, 'wrong_dest'};
+
+unsub(FlowSource, {_DestType, _Dest, {Methods, false}}) ->
+    {error, 'wrong_method'}.
+
+
+unsub(FlowSource, {DestType, Dest, Methods}) ->
+    unsub(FlowSource, {
+            verify_dest_type(DestType),
+            verify_dest(Dest),
+            verify_method(Methods)
+    });
 
 unsubscribe(_FlowSource,_FlowDest) -> ok. % todo
 % ================================ end of sub part =============================
 
 
-
+verify_dest_type('process') -> {'process', true};
+verify_dest_type('poolboy') -> {'poolboy', true};
+verify_dest_type(DestTypes) when is_list(DestTypes) ->
+    lists:foldl(fun
+            (_DestType, {_Acc, false}) ->
+                {DestTypes, false};
+            (DestType, {Acc, true}) ->
+                {[verify_dest_type(DestType) | Acc end, {[], true}, DestTypes)
 
 % ---------------------------------other functions -----------------------------
 
@@ -460,7 +515,7 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
     Words = split_topic(Topic),
     % save topic to '$erlroute_topics'
     ets:insert('$erlroute_topics', #topics{
-            topic = Topic, 
+            topic = Topic,
             words = Words,
             module = Module,
             line = Line,
@@ -470,11 +525,11 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
     lists:append(WhoGetAlready, lists:map(
         % todo: maybe better use matchspec?
         fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method}) ->
-            case lists:member(Dest, WhoGetAlready) of 
-                false -> 
+            case lists:member(Dest, WhoGetAlready) of
+                false ->
                     ToInsert = #complete_routes{
-                        topic = Topic, 
-                        dest_type = DestType, 
+                        topic = Topic,
+                        dest_type = DestType,
                         dest = Dest,
                         method = Method,
                         parent_topic = {'$erlroute_global_sub', Topic}
@@ -505,17 +560,17 @@ generate_complete_routing_name(Module) when is_atom(Module)->
 generate_parametrized_routing_name(Module) when is_atom(Module)->
     list_to_atom("$erlroute_prm_" ++ atom_to_list(Module)).
 
-% @doc Check if ets routing table is present, on falure - let's create it 
+% @doc Check if ets routing table is present, on falure - let's create it
 -spec route_table_must_present (EtsName) -> Result when
       EtsName   ::  atom(),
       Result    ::  atom().
 
 route_table_must_present(EtsName) ->
    case ets:info(EtsName, size) of
-       undefined -> 
-            _Tid = ets:new(EtsName, [bag, protected, 
-                {read_concurrency, true}, 
-                {keypos, #complete_routes.topic}, 
+       undefined ->
+            _Tid = ets:new(EtsName, [bag, protected,
+                {read_concurrency, true},
+                {keypos, #complete_routes.topic},
                 named_table
             ]), EtsName;
        _ ->
@@ -535,14 +590,14 @@ is_final_topic(Topic) ->
         nomatch -> {true, undefined};
         _ -> {false, split_topic(Topic)}
     end.
-    
+
 % @doc split binary topic to the list
 % binary:split/2 doesn't work well if contain pattern like .*
 -spec split_topic(Key) -> Result when
     Key :: binary(),
     Result :: nonempty_list().
 
-split_topic(Bin) ->	
+split_topic(Bin) ->
     split_topic(Bin, [], []).
 split_topic(<<>>, WAcc, Result) ->
     lists:reverse([lists:reverse(WAcc)|Result]);
