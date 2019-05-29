@@ -1,4 +1,4 @@
-image:https://api.travis-ci.org/spylik/erlroute.svg?branch=develop[title="Build Status", link="https://travis-ci.org/spylik/erlroute"] image:https://codecov.io/gh/spylik/erlroute/branch/develop/graph/badge.svg[title="Codecov", link="https://codecov.io/gh/spylik/erlroute/branches/develop"]
+image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build Status", link="https://travis-ci.org/spylik/erlroute"] image:https://codecov.io/gh/spylik/erlroute/branch/master/graph/badge.svg[title="Codecov", link="https://codecov.io/gh/spylik/erlroute/branches/master"]
 
 = Erlroute
 

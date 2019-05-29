@@ -18,7 +18,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
-% export start/stop api 
+% export start/stop api
 -export([
         start_link/0,
         stop/0, stop/1
@@ -214,7 +214,7 @@ pub(Message) ->
     Line = ?LINE,
     Topic = list_to_binary(lists:concat([Module,",",Line])),
     error_logger:warning_msg("Attempt to use pub/1 without parse_transform. ?MODULE, ?LINE and Topic will be wrong."),
-    pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)). 
+    pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
 
 % shortcut (should use parse transform better than pub/2)
 -spec pub(Topic, Message) -> Result when
@@ -278,51 +278,59 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}), 
+    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}),
     WhoGetWhileSync;
 pub(Module, Process, Line, Topic, Message, async, EtsName) ->
-    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, []}), 
+    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, []}),
     [];
 pub(Module, Process, Line, Topic, Message, sync, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
     post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync).
 
-% load routing recursion 
+% load routing recursion
 load_routing_and_send(EtsName, Topic, Message, Acc) ->
-    try ets:lookup(EtsName, Topic) of 
-        [] when Topic =/= <<"*">> -> 
+    try ets:lookup(EtsName, Topic) of
+        [] when Topic =/= <<"*">> ->
             load_routing_and_send(EtsName, <<"*">>, Message, Acc);
         [] ->
             Acc;
-        Routes when Topic =/= <<"*">> -> 
+        Routes when Topic =/= <<"*">> ->
             % send to wildcard-topic subscribers
-            load_routing_and_send(EtsName, <<"*">>, Message, send(Routes, Message, Acc));
+            load_routing_and_send(EtsName, <<"*">>, Message, send(Routes, Message, Topic, Acc));
         Routes ->
-            send(Routes, Message, Acc)
+            send(Routes, Message, Topic, Acc)
     catch
         _:_ ->
             Acc
     end.
 
--spec send(Routes, Message, Acc) -> Result when
+-spec send(Routes, Message, Topic, Acc) -> Result when
     Routes  ::  [complete_routes()],
     Message ::  term(),
+    Topic   ::  topic(),
     Acc     ::  [proc()],
     Result  ::  [proc()].
 
 % sending to standart process
-send([#complete_routes{dest_type = 'process', dest = Process, method = Method}|T], Message, Acc) ->
+send([#complete_routes{dest_type = 'process', dest = Process, method = Method}|T], Message, Topic, Acc) ->
     case Method of
         info -> Process ! Message;
         cast -> gen_server:cast(Process, Message);
         call -> gen_server:call(Process, Message)
     end,
-    send(T, Message, [Process|Acc]);
+    send(T, Message, Topic, [Process|Acc]);
+
+% fun apply
+send([#complete_routes{dest_type = 'function', dest = Function, method = apply}|T], Message, Topic, Acc) when is_function(Function, 1) ->
+    send(T, Message, Topic, [spawn(fun() -> erlang:apply(Function, [Message]) end) | Acc]);
+send([#complete_routes{dest_type = 'function', dest = Function, method = apply}|T], Message, Topic, Acc) when is_function(Function, 2) ->
+    send(T, Message, Topic, [spawn(fun() -> erlang:apply(Function, [Topic, Message]) end) | Acc]);
+
 
 % sending to poolboy pool
-send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|T], Message, Acc) ->
+send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|T], Message, Topic, Acc) ->
     NewAcc = try poolboy:checkout(PoolName) of
-        Worker when is_pid(Worker) -> 
+        Worker when is_pid(Worker) ->
             case Method of
                 info -> Worker ! Message;
                 cast -> gen_server:cast(Worker, Message);
@@ -336,10 +344,10 @@ send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|
     catch
         X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
     end,
-    send(T, Message, NewAcc);
+    send(T, Message, Topic, NewAcc);
 
 % final clause for empty list
-send([], _Message, Acc) -> Acc.
+send([], _Message, _Topic, Acc) -> Acc.
 
 % ================================ end of pub part =============================
 % ----------------------------------- sub part ---------------------------------
@@ -362,15 +370,18 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 % @doc full subscribtion api
 -spec sub(FlowSource,FlowDest) -> ok when
     FlowSource  :: flow_source() | nonempty_list() | binary() | module(),
-    FlowDest    :: flow_dest() | pid() | atom().
+    FlowDest    :: flow_dest() | pid() | atom() | fun().
 
-sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when 
+sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
         DestType =:= 'process' orelse DestType =:= 'poolboy',
         is_pid(Dest) orelse is_atom(Dest),
         Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
+
+sub(FlowSource, FlowDest) when is_function(FlowDest, 1) orelse is_function(FlowDest, 2) ->
+    sub(FlowSource, {function, FlowDest, apply});
 
 % when Dest is pid() or atom
 sub(FlowSource, FlowDest) when is_pid(FlowDest) orelse is_atom(FlowDest) ->
@@ -384,16 +395,16 @@ sub(FlowSource, FlowDest) when is_atom(FlowSource) ->
 sub(FlowSource, FlowDest) when is_binary(FlowSource) ->
     sub(#flow_source{topic = FlowSource}, FlowDest);
 
-% when FlowSource is_list 
+% when FlowSource is_list
 sub(FlowSource, FlowDest) when is_list(FlowSource) ->
     sub(#flow_source{
-            module = case lists:keyfind(module, 1, FlowSource) of 
-                false -> undefined; 
+            module = case lists:keyfind(module, 1, FlowSource) of
+                false -> undefined;
                 {module, Data} -> Data
             end,
-            topic = case lists:keyfind(topic, 1, FlowSource) of 
-                false -> <<"*">>; 
-                {topic, Data} -> Data 
+            topic = case lists:keyfind(topic, 1, FlowSource) of
+                false -> <<"*">>;
+                {topic, Data} -> Data
             end
         }, FlowDest).
 
@@ -416,11 +427,11 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
     _ = case IsFinal of
         true ->
             lists:map(fun(#topics{module = Module}) ->
-                ets:insert(route_table_must_present(generate_complete_routing_name(Module)), 
+                ets:insert(route_table_must_present(generate_complete_routing_name(Module)),
                     #complete_routes{
-                        topic = Topic, 
-                        dest_type = DestType, 
-                        dest = Dest, 
+                        topic = Topic,
+                        dest_type = DestType,
+                        dest = Dest,
                         method = Method,
                         parent_topic = {'$erlroute_global_sub', Topic}
                     }
@@ -428,12 +439,12 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
             end, ets:lookup('$erlroute_topics',Topic));
         false -> todo % implement for parametrized topics
     end,
-    ok; 
+    ok;
 
 % @doc subscribe for specified module
 subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) ->
     {IsFinal, Words} = is_final_topic(Topic),
-    case IsFinal of 
+    case IsFinal of
         true ->
             EtsName = generate_complete_routing_name(Module),
             _ = route_table_must_present(EtsName),
@@ -460,7 +471,7 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
     Words = split_topic(Topic),
     % save topic to '$erlroute_topics'
     ets:insert('$erlroute_topics', #topics{
-            topic = Topic, 
+            topic = Topic,
             words = Words,
             module = Module,
             line = Line,
@@ -470,16 +481,16 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
     lists:append(WhoGetAlready, lists:map(
         % todo: maybe better use matchspec?
         fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method}) ->
-            case lists:member(Dest, WhoGetAlready) of 
-                false -> 
+            case lists:member(Dest, WhoGetAlready) of
+                false ->
                     ToInsert = #complete_routes{
-                        topic = Topic, 
-                        dest_type = DestType, 
+                        topic = Topic,
+                        dest_type = DestType,
                         dest = Dest,
                         method = Method,
                         parent_topic = {'$erlroute_global_sub', Topic}
                     },
-                    Toreturn = send([ToInsert], Message, []),
+                    Toreturn = send([ToInsert], Message, Topic, []),
                     ets:insert(route_table_must_present(EtsName), ToInsert),
                     Toreturn;
                 true ->
@@ -505,17 +516,17 @@ generate_complete_routing_name(Module) when is_atom(Module)->
 generate_parametrized_routing_name(Module) when is_atom(Module)->
     list_to_atom("$erlroute_prm_" ++ atom_to_list(Module)).
 
-% @doc Check if ets routing table is present, on falure - let's create it 
+% @doc Check if ets routing table is present, on falure - let's create it
 -spec route_table_must_present (EtsName) -> Result when
       EtsName   ::  atom(),
       Result    ::  atom().
 
 route_table_must_present(EtsName) ->
    case ets:info(EtsName, size) of
-       undefined -> 
-            _Tid = ets:new(EtsName, [bag, protected, 
-                {read_concurrency, true}, 
-                {keypos, #complete_routes.topic}, 
+       undefined ->
+            _Tid = ets:new(EtsName, [bag, protected,
+                {read_concurrency, true},
+                {keypos, #complete_routes.topic},
                 named_table
             ]), EtsName;
        _ ->
@@ -535,14 +546,14 @@ is_final_topic(Topic) ->
         nomatch -> {true, undefined};
         _ -> {false, split_topic(Topic)}
     end.
-    
+
 % @doc split binary topic to the list
 % binary:split/2 doesn't work well if contain pattern like .*
 -spec split_topic(Key) -> Result when
     Key :: binary(),
     Result :: nonempty_list().
 
-split_topic(Bin) ->	
+split_topic(Bin) ->
     split_topic(Bin, [], []).
 split_topic(<<>>, WAcc, Result) ->
     lists:reverse([lists:reverse(WAcc)|Result]);

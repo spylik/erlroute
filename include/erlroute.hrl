@@ -15,18 +15,18 @@
 -type pubtype() :: 'sync' | 'async' | 'hybrid'.
 -type topic() :: binary().
 -type proc() :: pid() | atom().
--type method() :: 'info' | 'cast' | 'call'.
+-type delivery_method() :: 'info' | 'cast' | 'call' | 'apply'.
 -type id() :: {neg_integer(), pos_integer()}.
 -type etsname() :: atom().
--type desttype() :: 'process' | 'poolboy'.
+-type desttype() :: 'process' | 'poolboy' | 'function'.
 -type pubresult() :: [] | [proc()].
 
 % only for cache for final topics (generated with module name)
 -record(complete_routes, {
         topic :: topic(),
         dest_type :: desttype(),
-        dest :: atom(),
-        method = 'info' :: 'call' | 'cast' | 'info',
+        dest :: proc() | fun(),
+        method = 'info' :: delivery_method(),
         parent_topic = 'undefined' :: 'undefined' | {etsname(), binary()}
 	}).
 
@@ -36,8 +36,8 @@
 -record(parametrize_routes, {
         topic :: topic(),
         dest_type :: desttype(),
-        dest :: atom(),
-        method = 'info' ::'call' | 'cast' | 'info',
+        dest :: atom() | pid() | fun(),
+        method = 'info' :: delivery_method(),
         words :: nonempty_list()
 	}).
 
@@ -47,8 +47,8 @@
         is_final_topic = true :: boolean(),
         words = 'undefined' :: 'undefined' | nonempty_list(),
         dest_type :: desttype(),
-        dest :: atom(),
-        method = 'info' ::'call' | 'cast' | 'info'
+        dest :: atom() | pid() | fun(),
+        method = 'info' :: delivery_method()
     }).
 
 -record(topics, {
@@ -65,6 +65,8 @@
     }).
 
 -type flow_source() :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
--type flow_dest() :: {process, proc(), method()} | {poolboy, atom(), method()}.
+-type flow_dest()   :: {process, proc(), delivery_method()}
+                     | {poolboy, atom(), delivery_method()}
+                     | {function, fun(), delivery_method()}.
 
 
