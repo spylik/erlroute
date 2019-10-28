@@ -6,8 +6,6 @@ TEST_ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +debu
 
 dep_teaser = git https://github.com/spylik/teaser master
 
-DEPS = parse_trans
-
 TEST_DEPS = teaser poolboy
 
 ifeq ($(USER),travis)
