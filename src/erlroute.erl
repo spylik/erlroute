@@ -37,10 +37,6 @@
         generate_complete_routing_name/1 % export support function for parse_transform
     ]).
 
--export_type([
-    flow_dest/0
-]).
-
 % we will use ?MODULE as servername
 -define(SERVER, ?MODULE).
 
