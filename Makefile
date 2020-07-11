@@ -1,5 +1,12 @@
 PROJECT = erlroute
 
+# --------------------------------------------------------------------
+# Defining OTP version for this project which uses by kerl
+# --------------------------------------------------------------------
+
+ERLANG_OTP = OTP-22.3
+
+
 TEST_ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +debug_info
 
 #ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +warn_missing_spec -Werror
