@@ -470,13 +470,25 @@ unsubscribe(_FlowSource,_FlowDest) -> ok. % todo
 post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlready) ->
     Words = split_topic(Topic),
     % save topic to '$erlroute_topics'
-    ets:insert('$erlroute_topics', #topics{
-            topic = Topic,
-            words = Words,
-            module = Module,
-            line = Line,
-            process = Process
-        }),
+    Base = case is_pid(Process) of
+        true ->
+            case process_info(Process, [registered_name]) of
+                [{registered_name, SomeName}] ->
+                    #topics{process = SomeName};
+                [] ->
+                    #topics{process = '$erlroute_unregistered'};
+                undefined ->
+                    #topics{process = '$erlroute_unregistered_and_dead'}
+            end;
+        false ->
+            #topics{process = Process}
+    end,
+    _ = ets:insert('$erlroute_topics', Base#topics{
+        topic = Topic,
+        words = Words,
+        module = Module,
+        line = Line
+    }),
     % match global subscribers with specified topic
     lists:append(WhoGetAlready, lists:map(
         % todo: maybe better use matchspec?
