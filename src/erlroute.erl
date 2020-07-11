@@ -375,9 +375,9 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
-        DestType =:= 'process' orelse DestType =:= 'poolboy',
-        is_pid(Dest) orelse is_atom(Dest),
-        Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' ->
+        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function',
+        is_pid(Dest) orelse is_atom(Dest) orelse is_function(Dest),
+        Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' orelse Method =:= 'apply' ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
 sub(FlowSource, FlowDest) when is_function(FlowDest, 1) orelse is_function(FlowDest, 2) ->
