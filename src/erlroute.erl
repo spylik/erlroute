@@ -99,6 +99,10 @@ init([]) ->
     State :: term(),
     Result :: {reply, Result, State}.
 
+handle_call({save_topic, Module, Process, Line, Topic}, _From, State) ->
+    _ = save_topic(Module, Process, Line, Topic),
+    {reply, ok, State};
+
 handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
     Result = subscribe(FlowSource, FlowDest),
     {reply, Result, State};
@@ -133,7 +137,8 @@ handle_call(Msg, _From, State) ->
     Result          :: {noreply, State}.
 
 handle_cast({new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}, State) ->
-    _ = post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync),
+    save_topic(Module, Process, Line, Topic),
+    _ = post_hitcache_routine(Topic, Message, EtsName, WhoGetWhileSync),
     {noreply, State};
 
 handle_cast(stop, State) ->
@@ -278,14 +283,16 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}),
+    ok = gen_server:call(erlroute, {save_topic, Module, Process, Line, Topic}),
+    spawn(fun() -> post_hitcache_routine(Topic, Message, EtsName, WhoGetWhileSync) end),
     WhoGetWhileSync;
 pub(Module, Process, Line, Topic, Message, async, EtsName) ->
     gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, []}),
     [];
 pub(Module, Process, Line, Topic, Message, sync, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync).
+    save_topic(Module, Process, Line, Topic),
+    post_hitcache_routine(Topic, Message, EtsName, WhoGetWhileSync).
 
 % load routing recursion
 load_routing_and_send(EtsName, Topic, Message, Acc) ->
@@ -467,7 +474,7 @@ unsubscribe(_FlowSource,_FlowDest) -> ok. % todo
 
 % ---------------------------------other functions -----------------------------
 
-post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlready) ->
+save_topic(Module, Process, Line, Topic) ->
     Words = split_topic(Topic),
     ProcessToWrite = case is_pid(Process) of
         true ->
@@ -488,7 +495,9 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
         module = Module,
         line = Line,
         process = ProcessToWrite
-    }),
+    }).
+
+post_hitcache_routine(Topic, Message, EtsName, WhoGetAlready) ->
     % match global subscribers with specified topic
     lists:append(WhoGetAlready, lists:map(
         % todo: maybe better use matchspec?

@@ -25,6 +25,6 @@ endif
 
 SHELL_DEPS = sync lager
 
-SHELL_OPTS = -pa ebin/ test/ -env ERL_LIBS deps -eval 'lager:start(),mlibs:discover()' -run mlibs autotest_on_compile
+SHELL_OPTS = -kernel shell_history enabled -pa ebin/ test/ -I -eval 'mlibs:discover()' -env ERL_LIBS deps -run mlibs autotest_on_compile
 
 include erlang.mk
