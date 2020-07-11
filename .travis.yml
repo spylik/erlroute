@@ -5,6 +5,6 @@ script:
   - make dialyze
   - make tests COVER=1
 otp_release:
-  - 19.0
+  - 22.3
 
 after_success: "escript ./deps/covertool/ebin/covertool.beam -cover ./eunit.coverdata -output cobertura.xml -appname erlroute -src ./src && codecov"
