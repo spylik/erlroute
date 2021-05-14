@@ -12,7 +12,7 @@ endif
 # Defining OTP version for this project which uses by kerl
 # --------------------------------------------------------------------
 
-ERLANG_OTP = OTP-22.3
+ERLANG_OTP = OTP-24.0-rc2
 
 # our includes (must rid after refactoring, esp. erlpusher, erlroute)
 OUR_INCS += $(DEPS_DIR)/teaser/include
