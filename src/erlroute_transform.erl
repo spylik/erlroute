@@ -85,8 +85,12 @@ do_transform(
             {atom, RealLine, EtsName}
         ]
     };
-do_transform(SomethingAnother) ->
+do_transform(_SomethingAnother) ->
     continue.
+
+-spec realline(LineOrLineWithPosition) -> Result when
+    LineOrLineWithPosition  :: {pos_integer(), pos_integer()} | pos_integer(),
+    Result                  :: pos_integer().
 
 realline({Line, _}) -> Line;
 realline(Line) when is_integer(Line) -> Line.
