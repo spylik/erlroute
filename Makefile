@@ -12,7 +12,9 @@ endif
 # Defining OTP version for this project which uses by kerl
 # --------------------------------------------------------------------
 
+ifneq ($(shell basename $(shell dirname $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST)))))), deps)
 ERLANG_OTP = OTP-24.0-rc2
+endif
 
 # our includes (must rid after refactoring, esp. erlpusher, erlroute)
 OUR_INCS += $(DEPS_DIR)/teaser/include
