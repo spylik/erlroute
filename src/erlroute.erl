@@ -479,7 +479,6 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
         line = Line,
         process = ProcessToWrite
     }),
-
     % match global subscribers with specified topic
     lists:append(WhoGetAlready, lists:map(
         % todo: maybe better use matchspec?
@@ -557,10 +556,9 @@ is_final_topic(Topic) ->
 
 % @doc Generate unique id
 -spec gen_id() -> Result when
-    Result      :: id().
+    Result      :: integer().
 
-gen_id() ->
-    {erlang:monotonic_time(), erlang:unique_integer([monotonic,positive])}.
+gen_id() -> erlang:unique_integer([monotonic]).
 
 % @doc split binary topic to the list
 % binary:split/2 doesn't work well if contain pattern like .*

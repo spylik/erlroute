@@ -16,7 +16,6 @@
 -type topic() :: binary().
 -type proc() :: pid() | atom().
 -type delivery_method() :: 'info' | 'cast' | 'call' | 'apply'.
--type id() :: {neg_integer(), pos_integer()}.
 -type etsname() :: atom().
 -type desttype() :: 'process' | 'poolboy' | 'function'.
 -type pubresult() :: [] | [proc()].
@@ -49,7 +48,7 @@
         dest_type :: desttype(),
         dest :: atom() | pid() | fun(),
         method = 'info' :: delivery_method(),
-        sub_ref :: id()
+        sub_ref :: integer()
     }).
 
 -record(topics, {
