@@ -35,7 +35,8 @@
         full_sync_pub/5,
         sub/2,
         sub/1,
-        generate_complete_routing_name/1 % export support function for parse_transform
+        generate_complete_routing_name/1, % export support function for parse_transform
+        post_hitcache_routine/7
     ]).
 
 % we will use ?MODULE as servername
