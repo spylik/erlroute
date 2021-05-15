@@ -108,6 +108,9 @@ handle_call({unsubscribe, FlowSource, FlowDest}, _From, State) ->
     unsubscribe(FlowSource, FlowDest),
     {reply, ok, State};
 
+handle_call({regtable, EtsName}, _From, State) ->
+    {reply, route_table_must_present(EtsName), State};
+
 % @doc unspec case for unknown messages
 handle_call(Msg, _From, State) ->
     error_logger:warning_msg("we are in undefined handle_call with message ~p\n",[Msg]),
@@ -116,26 +119,6 @@ handle_call(Msg, _From, State) ->
 %-----------end of handle_call-------------
 
 %--------------handle_cast-----------------
-
-% @doc callbacks for gen_server handle_cast.
--spec handle_cast(Message, State) -> Result when
-    Message         :: SubMsg | UnsubMsg | NewMsg,
-    SubMsg          :: {'subscribe', flow_source(), flow_dest()},
-    UnsubMsg        :: {'unsubscribe', flow_source(), flow_dest()},
-    NewMsg          :: {'new_msg', Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync},
-    WhoGetWhileSync :: pubresult(),
-    Module          :: module(),
-    Process         :: proc(),
-    Line            :: pos_integer(),
-    Topic           :: binary(),
-    Message         :: term(),
-    EtsName         :: atom(),
-    State           :: term(),
-    Result          :: {noreply, State}.
-
-handle_cast({new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}, State) ->
-    _ = post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync),
-    {noreply, State};
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -279,11 +262,13 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync}),
+    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync]),
     WhoGetWhileSync;
+
 pub(Module, Process, Line, Topic, Message, async, EtsName) ->
-    gen_server:cast(erlroute, {new_msg, Module, Process, Line, Topic, Message, EtsName, []}),
+    spawn(?MODULE, pub, [Module, Process, Line, Topic, Message, sync, EtsName]),
     [];
+
 pub(Module, Process, Line, Topic, Message, sync, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
     post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync).
@@ -535,13 +520,18 @@ generate_parametrized_routing_name(Module) when is_atom(Module)->
       Result    ::  atom().
 
 route_table_must_present(EtsName) ->
-   case ets:info(EtsName, size) of
-       undefined ->
-            _Tid = ets:new(EtsName, [bag, protected,
-                {read_concurrency, true},
-                {keypos, #complete_routes.topic},
-                named_table
-            ]), EtsName;
+    case ets:info(EtsName, size) of
+        undefined ->
+            case whereis(?SERVER) == self() of
+                true ->
+                    _Tid = ets:new(EtsName, [bag, public,
+                        {read_concurrency, true},
+                        {keypos, #complete_routes.topic},
+                        named_table
+                    ]), EtsName;
+                false ->
+                    gen_server:call(?SERVER, {regtable, EtsName})
+            end;
        _ ->
            EtsName
    end.

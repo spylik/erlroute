@@ -11,11 +11,10 @@
 -define(NOTEST, true).
 -ifdef(TEST).
     -compile(export_all).
+    -compile(nowarn_export_all).
 -endif.
 
 -export([parse_transform/2]).
-
--include("utils.hrl").
 
 -spec parse_transform(AST, Options) -> Result when
     AST     ::  [erl_parse:abstract_form() | erl_parse:form_info()],
