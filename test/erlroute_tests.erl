@@ -389,7 +389,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     words = undefined,
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    sub_ref = '_'
                                 },
                                 [],
                                 [true]
@@ -414,7 +415,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     words = ["testtopic0","!","testtopic1"],
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    sub_ref = '_'
                                 },
                                 [],
                                 [true]
@@ -488,7 +490,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     words = undefined,
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    sub_ref = '_'
                                 },
                                 [],
                                 [true]
@@ -588,7 +591,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     words = undefined,
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    sub_ref = '_'
                                 },
                                 [],
                                 [true]
@@ -864,7 +868,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     words = 'undefined',
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    sub_ref = '_'
                                 },
                                 [],
                                 [true]
@@ -893,7 +898,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     words = 'undefined',
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    sub_ref = '_'
                                 },
                                 [],
                                 [true]
@@ -951,7 +957,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                     words = 'undefined',
                                     dest_type = DestType,
                                     dest = Dest,
-                                    method = Method
+                                    method = Method,
+                                    sub_ref = '_'
                                 },
                                 [],
                                 [true]
@@ -1142,7 +1149,6 @@ split_topic_test() ->
     ?assertEqual(["*","test1"], erlroute:split_topic(<<"*.test1">>)).
 
 setup_start() ->
-    disable_output(),
     start_server().
 
 disable_output() ->

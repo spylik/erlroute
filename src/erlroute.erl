@@ -12,7 +12,6 @@
 -endif.
 
 -include("erlroute.hrl").
-
 -behaviour(gen_server).
 
 % export standart gen_server api
@@ -36,7 +35,7 @@
         sub/2,
         sub/1,
         generate_complete_routing_name/1, % export support function for parse_transform
-        post_hitcache_routine/7
+        post_hitcache_routine/8
     ]).
 
 % we will use ?MODULE as servername
@@ -263,7 +262,8 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync]),
+    PostRef = gen_id(),
+    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync, PostRef]),
     WhoGetWhileSync;
 
 pub(Module, Process, Line, Topic, Message, async, EtsName) ->
@@ -272,7 +272,7 @@ pub(Module, Process, Line, Topic, Message, async, EtsName) ->
 
 pub(Module, Process, Line, Topic, Message, sync, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync).
+    post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync, undefined).
 
 % load routing recursion
 load_routing_and_send(EtsName, Topic, Message, Acc) ->
@@ -409,7 +409,8 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
         words = Words,
         dest_type = DestType,
         dest = Dest,
-        method = Method
+        method = Method,
+        sub_ref = gen_id()
     }),
     _ = case IsFinal of
         true ->
@@ -454,17 +455,19 @@ unsubscribe(_FlowSource,_FlowDest) -> ok. % todo
 
 % ---------------------------------other functions -----------------------------
 
-post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlready) ->
+post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlready, PostRef) ->
     Words = split_topic(Topic),
     ProcessToWrite = case is_pid(Process) of
         true ->
             case process_info(Process, [registered_name]) of
-                [{registered_name, SomeName}] ->
+                [{registered_name, SomeName}] when is_atom(SomeName) ->
                     SomeName;
-                [] ->
+                [{registered_name, []}] ->
                     '$erlroute_unregistered';
                 undefined ->
-                    '$erlroute_unregistered_and_dead'
+                    '$erlroute_unregistered_and_dead';
+                [] ->
+                    '$erlroute_unregistered'
             end;
         false ->
             Process
@@ -476,11 +479,12 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
         line = Line,
         process = ProcessToWrite
     }),
+
     % match global subscribers with specified topic
     lists:append(WhoGetAlready, lists:map(
         % todo: maybe better use matchspec?
-        fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method}) ->
-            case lists:member(Dest, WhoGetAlready) of
+        fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}) ->
+            case (PostRef =:= undefined orelse SubRef < PostRef) andalso lists:member(Dest, WhoGetAlready) of
                 false ->
                     ToInsert = #complete_routes{
                         topic = Topic,
@@ -550,6 +554,13 @@ is_final_topic(Topic) ->
         nomatch -> {true, undefined};
         _ -> {false, split_topic(Topic)}
     end.
+
+% @doc Generate unique id
+-spec gen_id() -> Result when
+    Result      :: id().
+
+gen_id() ->
+    {erlang:monotonic_time(), erlang:unique_integer([monotonic,positive])}.
 
 % @doc split binary topic to the list
 % binary:split/2 doesn't work well if contain pattern like .*

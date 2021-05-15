@@ -48,7 +48,8 @@
         words = 'undefined' :: 'undefined' | nonempty_list(),
         dest_type :: desttype(),
         dest :: atom() | pid() | fun(),
-        method = 'info' :: delivery_method()
+        method = 'info' :: delivery_method(),
+        sub_ref :: id()
     }).
 
 -record(topics, {
