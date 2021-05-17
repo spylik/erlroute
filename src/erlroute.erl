@@ -483,8 +483,8 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
     lists:append(WhoGetAlready, lists:map(
         % todo: maybe better use matchspec?
         fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}) ->
-            case (PostRef =:= undefined orelse SubRef < PostRef) andalso lists:member(Dest, WhoGetAlready) of
-                false ->
+            case lists:member(Dest, WhoGetAlready) of
+                false when PostRef =:= undefined orelse PostRef > SubRef ->
                     ToInsert = #complete_routes{
                         topic = Topic,
                         dest_type = DestType,
@@ -495,7 +495,7 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
                     Toreturn = send([ToInsert], Message, Topic, []),
                     ets:insert(route_table_must_present(EtsName), ToInsert),
                     Toreturn;
-                true ->
+                _ ->
                     []
             end
         end, ets:lookup('$erlroute_global_sub', Topic)

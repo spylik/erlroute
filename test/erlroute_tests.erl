@@ -949,7 +949,6 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         ?assertEqual(undefined,ets:info(EtsName)),
 
                         erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
-                        timer:sleep(5),
                         MS = [{
                                 #subscribers_by_topic_only{
                                     topic = Topic,
@@ -965,10 +964,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                             }],
                         ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS)),
 
-                        % must present here
-                        ?assertNotEqual(undefined,ets:info(EtsName)),
+                        _ = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
 
-                        [Dest] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
                         timer:sleep(5),
 
                         ?assertNotEqual(undefined,ets:info(EtsName)),
