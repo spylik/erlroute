@@ -262,7 +262,7 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    PostRef = gen_id(),
+    PostRef = self(), %it's cheaper than generating id
     spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync, PostRef]),
     WhoGetWhileSync;
 
@@ -410,7 +410,7 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
         dest_type = DestType,
         dest = Dest,
         method = Method,
-        sub_ref = gen_id()
+        sub_ref = self() % it's cheaper than id, and anyway it's increasing
     }),
     _ = case IsFinal of
         true ->
@@ -553,12 +553,6 @@ is_final_topic(Topic) ->
         nomatch -> {true, undefined};
         _ -> {false, split_topic(Topic)}
     end.
-
-% @doc Generate unique id
--spec gen_id() -> Result when
-    Result      :: integer().
-
-gen_id() -> erlang:unique_integer([monotonic]).
 
 % @doc split binary topic to the list
 % binary:split/2 doesn't work well if contain pattern like .*
