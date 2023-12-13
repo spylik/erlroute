@@ -48,7 +48,7 @@
         dest_type :: desttype(),
         dest :: atom() | pid() | fun(),
         method = 'info' :: delivery_method(),
-        sub_ref :: pid()
+        sub_ref :: reference()
     }).
 
 -record(topics, {

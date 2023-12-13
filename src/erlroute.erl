@@ -262,7 +262,7 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    PostRef = self(), %it's cheaper than generating id
+    PostRef = erlang:make_ref(),
     spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync, PostRef]),
     WhoGetWhileSync;
 
@@ -410,7 +410,7 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
         dest_type = DestType,
         dest = Dest,
         method = Method,
-        sub_ref = self() % it's cheaper than id, and anyway it's increasing
+        sub_ref = erlang:make_ref()
     }),
     _ = case IsFinal of
         true ->
