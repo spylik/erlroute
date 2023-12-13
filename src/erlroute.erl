@@ -495,6 +495,8 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
                     Toreturn = send([ToInsert], Message, Topic, []),
                     ets:insert(route_table_must_present(EtsName), ToInsert),
                     Toreturn;
+                false when PostRef =/= undefined ->
+                    error_logger:error_msg("Face race condition when Subscribe reference ~p is Lower than pub_ref ~p\n",[SubRef, PostRef]);
                 _ ->
                     []
             end
