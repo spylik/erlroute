@@ -262,7 +262,7 @@ full_sync_pub(Module, Process, Line, Topic, Message) ->
 
 pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
     WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    PostRef = erlang:make_ref(),
+    PostRef = gen_id(),
     spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync, PostRef]),
     WhoGetWhileSync;
 
@@ -410,7 +410,7 @@ subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Meth
         dest_type = DestType,
         dest = Dest,
         method = Method,
-        sub_ref = erlang:make_ref()
+        sub_ref = gen_id()
     }),
     _ = case IsFinal of
         true ->
@@ -571,3 +571,10 @@ split_topic(<<2#00101110:8, Rest/binary>>, WAcc, Result) ->
 split_topic(<<Char:8, Rest/binary>>, WAcc, Result) ->
     split_topic(Rest, [Char|WAcc], Result);
 split_topic(<<>>, [], []) -> [].
+
+
+% @doc Generate unique id
+-spec gen_id() -> Result when
+    Result      :: integer().
+
+gen_id() -> erlang:monotonic_time().
