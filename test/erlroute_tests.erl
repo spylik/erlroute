@@ -208,7 +208,7 @@ erlroute_inorder_test_() ->
                     fun() ->
                         % source
                         ?assertEqual(0, ets:info('$erlroute_topics', size)),
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         SendTopic = <<"testtopic">>,
                         Process = self(),
                         Msg = make_ref(),
@@ -220,7 +220,7 @@ erlroute_inorder_test_() ->
                     fun() ->
                         % source
                         ?assertEqual(1, ets:info('$erlroute_topics', size)),
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         SendTopic = <<"testtopic">>,
                         Process = self(),
                         Msg = make_ref(),
@@ -232,7 +232,7 @@ erlroute_inorder_test_() ->
                     fun() ->
                         % source
                         ?assertEqual(2, ets:info('$erlroute_topics', size)),
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         SendTopic = <<"testtopic">>,
                         Process = self(),
                         Msg = make_ref(),
@@ -243,7 +243,7 @@ erlroute_inorder_test_() ->
                 {<<"After pub we must have for record and one record in topics ets with right data">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"testtopic">>,
                         Process = self(),
                         Msg = make_ref(),
@@ -267,7 +267,7 @@ erlroute_inorder_test_() ->
                 {<<"When we pub message to same topic, we do not add anything">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"testtopic">>,
                         Process = self(),
                         Msg = make_ref(),
@@ -296,7 +296,7 @@ erlroute_inorder_test_() ->
                 {<<"When we pub message from another module, we must have 2 entry for topic and one if match by full">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"testtopic2">>,
                         Process = self(),
                         Msg = make_ref(),
@@ -316,7 +316,7 @@ erlroute_inorder_test_() ->
                                 [true]
                             }],
                         ?assertEqual(1, ets:select_count('$erlroute_topics', MS1)),
-                        Module2 = mlibs:random_atom(),
+                        Module2 = tutils:random_atom(),
 
                         erlroute:pub(Module2, Process, 123, Topic, Msg),
                         timer:sleep(5),
@@ -349,7 +349,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/1 with atom as parameter erlroute must subscribed to module output">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"*">>,
                         % dest
                         DestType = process,
@@ -426,7 +426,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/1 with list as parameter erlroute must subscribed to right topic and module (module+topic)">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"testtopic">>,
                         % dest
                         DestType = process,
@@ -451,7 +451,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/1 with list as parameter erlroute must subscribed to right topic and module (module only)">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         % dest
                         DestType = process,
                         Dest = self(),
@@ -501,7 +501,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/2 when Source is complete and dest is pid() whould subscribe as {process, Pid, info}">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"*">>,
                         % dest
                         DestType = process,
@@ -526,7 +526,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/2 when Source is complete and dest is atom() whould subscribe as {process, Atom, info}">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"*">>,
                         % dest
                         DestType = process,
@@ -551,7 +551,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/2 when Source is atom and dest is complete should subscribe to module">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"*">>,
                         % dest
                         DestType = process,
@@ -602,7 +602,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/2 with full parameters and topic <<\"*\">>, ets tables must present and route entry must present in ets">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"*">>,
                         % dest
                         DestType = process,
@@ -627,7 +627,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"*">>,
                         % dest
                         DestType = process,
@@ -653,7 +653,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/2 with full parameters and topic <<\"*\">> (reversed), ets tables must present and route entry must present in ets">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"*">>,
                         % dest
                         DestType = process,
@@ -680,7 +680,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/2 without topic it should subscribe to <<\"*\">>">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"*">>,
                         % dest
                         DestType = process,
@@ -707,7 +707,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After multiple sync sub/6 attempts, ets tables must have only one route entry for each type/source">>,
                     fun() ->
                          % source
-                         Module = mlibs:random_atom(),
+                         Module = tutils:random_atom(),
                          Topic = <<"*">>,
                          % dest
                          DestType = process,
@@ -738,7 +738,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/2 with full parameters and topic <<\"testtopic.*.test1.test3\">>, ets tables must present and route entry must present in ets">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = <<"testtopic.*.test1.test3">>,
                         % dest
                         DestType = process,
@@ -764,7 +764,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"Erlroute able to deliver message to single subscriber with exactly the same topic">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         SendTopic = <<"testtopic">>,
                         SubTopic = <<"testtopic">>,
                         % dest
@@ -784,7 +784,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"Erlroute able to deliver message to single subscriber who subscribe to wilcard topic">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         SendTopic = <<"testtopic">>,
                         SubTopic = <<"*">>,
                         % dest
@@ -804,7 +804,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"Erlroute able to deliver multiple message with different topic to single subscriber who subscribe to wilcard topic from same module">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         SendTopic1 = <<"testtopic1">>,
                         SendTopic2 = <<"testtopic2">>,
                         SubTopic = <<"*">>,
@@ -826,8 +826,8 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"Messages from another module should do not delivered to another module subscribers">>,
                     fun() ->
                         % source
-                        Module1 = mlibs:random_atom(),
-                        Module2 = mlibs:random_atom(),
+                        Module1 = tutils:random_atom(),
+                        Module2 = tutils:random_atom(),
                         SendTopic1 = <<"testtopic1">>,
                         SendTopic2 = <<"testtopic2">>,
                         SendTopic3 = <<"testtopic3">>,
@@ -879,7 +879,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"Global subscribe to specified topic and then pub test">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = atom_to_binary(Module,latin1),
                         % dest
                         DestType = process,
@@ -933,7 +933,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"Global subscribe should cache existed topics (first pub then sub)">>,
                     fun() ->
                         % source
-                        Module = mlibs:random_atom(),
+                        Module = tutils:random_atom(),
                         Topic = atom_to_binary(Module,latin1),
                         % dest
                         DestType = process,
