@@ -18,7 +18,7 @@
 
 -spec parse_transform(AST, Options) -> Result when
     AST     ::  [erl_parse:abstract_form() | erl_parse:form_info()],
-    Options ::  [compile:option()],
+    Options ::  list(),
     Result  ::  [erl_parse:abstract_form() | erl_parse:form_info()].
 
 parse_transform(Forms, _Options) ->

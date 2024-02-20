@@ -316,21 +316,19 @@ send([#complete_routes{dest_type = 'function', dest = Function, method = apply}|
 
 % sending to poolboy pool
 send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|T], Message, Topic, Acc) ->
-    NewAcc = try poolboy:checkout(PoolName) of
-        Worker when is_pid(Worker) ->
+    NewAcc =
+        try
+            Worker = poolboy:checkout(PoolName),
             case Method of
                 info -> Worker ! Message;
                 cast -> gen_server:cast(Worker, Message);
                 call -> gen_server:call(Worker, Message)
             end,
             poolboy:checkin(PoolName, Worker),
-            [Worker|Acc];
-        _ ->
-            error_logger:error_msg("Worker not is pid"),
-            Acc
-    catch
-        X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
-    end,
+            [Worker | Acc]
+        catch
+            X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
+        end,
     send(T, Message, Topic, NewAcc);
 
 % final clause for empty list

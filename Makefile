@@ -28,6 +28,7 @@ dep_teaser = git https://github.com/spylik/teaser develop
 DEPS = parse_trans
 
 TEST_DEPS = teaser poolboy
+PLT_APPS = poolboy
 
 ifeq ($(USER),travis)
 	ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +warn_missing_spec -Werror
