@@ -2,8 +2,8 @@ language: erlang
 install: "sudo pip install codecov"
 script: 
   - make
-  - make dialyze
   - make tests COVER=1
+  - make dialyze
 otp_release:
   - OTP-26
 
