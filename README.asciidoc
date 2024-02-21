@@ -1,22 +1,29 @@
-image:https://api.travis-ci.org/spylik/erlroute.svg?branch=master[title="Build Status", link="https://travis-ci.org/spylik/erlroute"] image:https://codecov.io/gh/spylik/erlroute/branch/master/graph/badge.svg[title="Codecov", link="https://codecov.io/gh/spylik/erlroute/branches/master"]
-
 = Erlroute
 
 Erlroute is the simple message router designed for http://www.jpaulmorrison.com/fbp/index.shtml[Flow Based Programming paradigm^].
 
 The main idea is to use `erlroute:pub` everywhere, where you may require the data now or in the future.
 
-Actually, erlroute do simple job - it just send messages to... and "where" you can define later.
+Actually, erlroute do simple job - it just route messages and execution flow. Simply write erlroute:pub in places which
+will require dinamic route and "destination" you can define later.
+
+Destinations could be:
+- other processes
+- functions
+- pool workers
 
 == Why just do not use AMQP broker for this purpose?
 
-AMQP brokers are really great! With AMQP you able to implement very flexible and complex solutions. But sometimes, when you just need to route messages inside your erlang application use amqp-broker is like to shoot out
-of cannon into sparrows. When you do not need full AMQP features, erlroute is here. 
+1. AMQP brokers are really great! With AMQP you able to implement very flexible and complex solutions. But sometimes, when you just need to route messages inside your erlang application use amqp-broker is like to shoot out of cannon into sparrows. When you do not need full AMQP features, erlroute is here. 
 
-Erlroute designed to be low-weight, simple, fast and suitable only for manage message routes inside your Erlang applications between Erlang processes.
+2. AMQP brokers designed for message passing, meanwhile erlroute also able to manage dynamic execution routes within same process.
+
+Erlroute designed to be low-weight, simple, fast and suitable only for manage messages & execution routes inside your Erlang applications.
 
 == When erlroute useful for you and when not so?
-* Erlroute useful if you are going to design dynamically environment where one group of processes (listeners) in some cases may require data from other processes (producers) and in some another cases - do not.
+
+* Erlroute useful if you are going to design dynamically environment where one group of processes (listeners) in some cases may require data from other processes (producers) and in some another cases - do not;
+* Erlroute useful when you want to implement dynamical execution pipelines (flows) within same process;
 * Erlroute useful during development - you don't need anymore to think in advance about you may require the data from this line of code somwhere in future or not.
 * Erlroute useful to avoid construction like:
 
@@ -52,7 +59,7 @@ Erlroute actually do same job as axons and dendrits. Some neuron generate and pr
 
 * ets based;
 * due per module cache 'erlroute:pub' is very cheap;
-* support pools as destinations;
+* support not only message passings, but functions and pools as destinations;
 * parse transform for build ets-names during compile time.
 
 == Interface
