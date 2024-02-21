@@ -35,7 +35,8 @@
         sub/2,
         sub/1,
         generate_complete_routing_name/1, % export support function for parse_transform
-        post_hitcache_routine/8
+        post_hitcache_routine/8,
+		gen_static_fun_dest/2
     ]).
 
 % we will use ?MODULE as servername
@@ -299,7 +300,7 @@ load_routing_and_send(EtsName, Topic, Message, Acc) ->
     Result  ::  [proc()].
 
 % sending to standart process
-send([#complete_routes{dest_type = 'process', dest = Process, method = Method}|T], Message, Topic, Acc) ->
+send([#complete_routes{dest_type = 'process', method = Method, dest = Process}|T], Message, Topic, Acc) ->
     case Method of
         info -> Process ! Message;
         cast -> gen_server:cast(Process, Message);
@@ -307,15 +308,50 @@ send([#complete_routes{dest_type = 'process', dest = Process, method = Method}|T
     end,
     send(T, Message, Topic, [Process|Acc]);
 
-% fun apply
-send([#complete_routes{dest_type = 'function', dest = Function, method = apply}|T], Message, Topic, Acc) when is_function(Function, 1) ->
-    send(T, Message, Topic, [spawn(fun() -> erlang:apply(Function, [Message]) end) | Acc]);
-send([#complete_routes{dest_type = 'function', dest = Function, method = apply}|T], Message, Topic, Acc) when is_function(Function, 2) ->
-    send(T, Message, Topic, [spawn(fun() -> erlang:apply(Function, [Topic, Message]) end) | Acc]);
-
+% apply process
+send([#complete_routes{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic}}|T], Message, Topic, Acc) ->
+    send(T, Message, Topic,
+        case Method of
+            cast ->
+				case {is_function(Function), ShellIncludeTopic} of
+                    {true, true} ->
+                        [spawn(fun() -> erlang:apply(Function, [Topic, Message]) end) | Acc];
+                    {true, false} ->
+                        [spawn(fun() -> erlang:apply(Function, [Message]) end) | Acc];
+                    {false, true} ->
+						{Module, StaticFunction, PredefinedArgs} = Function,
+                        [spawn(Module, StaticFunction, [Topic, Message | PredefinedArgs]) | Acc];
+                    {false, false} ->
+						{Module, StaticFunction, PredefinedArgs} = Function,
+                        [spawn(Module, StaticFunction, [Message | PredefinedArgs]) | Acc]
+                end;
+            call ->
+				case {is_function(Function), ShellIncludeTopic} of
+                    {true, true} ->
+                        erlang:apply(Function, [Topic, Message]);
+                    {true, false} ->
+                        erlang:apply(Function, [Message]);
+                    {false, true} ->
+                        {Module, StaticFunction, PredefinedArgs} = Function,
+                        Module:StaticFunction([Topic, Message | PredefinedArgs]);
+					{false, false} ->
+                        {Module, StaticFunction, PredefinedArgs} = Function,
+                        Module:StaticFunction([Message | PredefinedArgs])
+                end,
+                Acc;
+            {Node, cast} when is_atom(Node) ->
+                case ShellIncludeTopic of
+                    true ->
+                        erpc:cast(Node, fun() -> erlang:apply(Function, [Topic, Message]) end);
+                    false ->
+                        erpc:cast(Node, fun() -> erlang:apply(Function, [Message]) end)
+                end,
+                Acc
+        end
+    );
 
 % sending to poolboy pool
-send([#complete_routes{dest_type = 'poolboy', dest = PoolName, method = Method}|T], Message, Topic, Acc) ->
+send([#complete_routes{dest_type = 'poolboy', method = Method, dest = PoolName}|T], Message, Topic, Acc) ->
     NewAcc =
         try
             Worker = poolboy:checkout(PoolName),
@@ -347,30 +383,47 @@ send([], _Message, _Topic, Acc) -> Acc.
 
 % @doc subscribe current process to all messages from module Module
 sub(Module) when is_atom(Module) -> sub(#flow_source{module = Module, topic = <<"*">>}, {process, self(), info});
+
 % @doc subscribe current process to messages with topic Topic from any module
 sub(Topic) when is_binary(Topic) -> sub(#flow_source{module = undefined, topic = Topic}, {process, self(), info});
+
 % @doc subscribe current process to messages with full-defined FlowSource ([{module, Module}, {topic, Topic}])
 sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), info}).
 
 % @doc full subscribtion api
--spec sub(FlowSource,FlowDest) -> ok when
+-spec sub(FlowSource, FlowDest) -> ok when
     FlowSource  :: flow_source() | nonempty_list() | binary() | module(),
-    FlowDest    :: flow_dest() | pid() | atom() | fun().
+    FlowDest    :: flow_dest()
+                 | pid()
+                 | atom()
+                 | fun() | {node() | fun()}
+                 | static_function() | {node(), static_function()}.
 
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
-        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function',
-        is_pid(Dest) orelse is_atom(Dest) orelse is_function(Dest),
-        Method =:= 'info' orelse Method =:= 'cast' orelse Method =:= 'call' orelse Method =:= 'apply' ->
+        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function'  ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
-
-sub(FlowSource, FlowDest) when is_function(FlowDest, 1) orelse is_function(FlowDest, 2) ->
-    sub(FlowSource, {function, FlowDest, apply});
 
 % when Dest is pid() or atom
 sub(FlowSource, FlowDest) when is_pid(FlowDest) orelse is_atom(FlowDest) ->
     sub(FlowSource, {process, FlowDest, info});
+
+% when Dest is higher order functions (by default this will be executed on subscriber node (as a most common case), not producer)
+sub(FlowSource, FlowDest) when is_function(FlowDest, 1) orelse is_function(FlowDest, 2) ->
+    sub(FlowSource, {function, {FlowDest, is_function(FlowDest, 2)}, cast});
+
+% when Dest is higher order functions which have to be executed on specific node
+sub(FlowSource, {Node, Function}) when is_atom(Node) andalso (is_function(Function, 1) orelse is_function(Function, 2)) ->
+    sub(FlowSource, {function, {Function, is_function(Function, 2)}, {Node, cast}});
+
+% when Dest is a Module:Function([Msg | ExtraArguments])
+sub(FlowSource, {Module, Function, Arguments} = MFA) when is_atom(Module) andalso is_atom(Function) andalso is_list(Arguments) ->
+    sub(FlowSource, {function, gen_static_fun_dest('$local', MFA), cast});
+
+% when Dest is mfa which have to be executed on specific node
+sub(FlowSource, {Node, {Module, Function, Arguments} = MFA}) when is_atom(Node) andalso is_atom(Module) andalso is_atom(Function) andalso is_list(Arguments) ->
+    sub(FlowSource, {function, gen_static_fun_dest(Node, MFA), {Node, cast}});
 
 % when FlowSource is_atom()
 sub(FlowSource, FlowDest) when is_atom(FlowSource) ->
@@ -576,3 +629,29 @@ split_topic(<<>>, [], []) -> [].
     Result      :: integer().
 
 gen_id() -> erlang:monotonic_time().
+
+-spec gen_static_fun_dest(Node, StaticFunction) -> Result when
+	Node			:: '$local' | node(),
+	StaticFunction	:: static_function(),
+	Result			:: fun_dest().
+
+gen_static_fun_dest('$local', {Module, Function, PredefinedArgs} = MFA) ->
+	ExtraArgsLength = length(PredefinedArgs),
+    case erlang:function_exported(Module, Function, ExtraArgsLength + 2) of
+		true ->
+			{MFA, true};
+		false ->
+			case erlang:function_exported(Module, Function, ExtraArgsLength + 1) of
+				true ->
+					{MFA, false};
+				false ->
+					throw(unknown_function)
+			end
+	end;
+gen_static_fun_dest(Node, MFA) ->
+	try
+		gen_static_fun_dest('$local', MFA)
+	catch
+		_:_ ->
+			erpc:call(Node, ?MODULE, gen_static_fun_dest, ['$local', MFA], 1000)
+	end.
