@@ -12,6 +12,7 @@
 -endif.
 
 -include("erlroute.hrl").
+-include_lib("kernel/include/logger.hrl").
 -behaviour(gen_server).
 
 % export standart gen_server api
@@ -98,7 +99,7 @@ init([]) ->
     UnsubMsg :: {'unsubscribe', flow_source(), flow_dest()},
     From :: {pid(), Tag},
     Tag :: term(),
-    State :: term(),
+    State :: erleventer_state(),
     Result :: {reply, Result, State}.
 
 handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
@@ -120,6 +121,11 @@ handle_call(Msg, _From, State) ->
 %-----------end of handle_call-------------
 
 %--------------handle_cast-----------------
+
+-spec handle_cast(HandleCastEvents, State) -> Result when
+    HandleCastEvents    :: stop,
+    State               :: erleventer_state(),
+    Result              :: {noreply, State} | {stop, normal, State}.
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -175,11 +181,11 @@ code_change(_OldVsn, State, _Extra) ->
 %
 % For publish avialiable following parse_transform and macros shourtcuts:
 %
-% pub(Message) ----> generating topic and transforming to
-% pub(?MODULE, self(), ?LINE, <<"?MODULE.?LINE">>, Message, hybrid, '$erlroute_?MODULE')
+% pub(Payload) ----> generating topic and transforming to
+% pub(?MODULE, self(), ?LINE, <<"?MODULE.?LINE">>, Payload, hybrid, '$erlroute_?MODULE')
 %
-% pub(Message, Topic) ----> transforming to
-% pub(?MODULE, self(), ?LINE, Topic, Message, hybrid, '$erlroute_?MODULE')
+% pub(Payload, Topic) ----> transforming to
+% pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, '$erlroute_?MODULE')
 %
 % To use parse transform +{parse_transform, erlroute_transform} must be added as compile options.
 %
@@ -190,185 +196,187 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 % shortcut (should use parse transform better than pub/1)
--spec pub(Message) -> Result when
-    Message ::  term(),
-    Result  ::  pubresult().
+-spec pub(Payload) -> Result when
+    Payload ::  payload(),
+    Result  ::  pub_result().
 
-pub(Message) ->
+pub(Payload) ->
     Module = ?MODULE,
     Line = ?LINE,
     Topic = list_to_binary(lists:concat([Module,",",Line])),
     error_logger:warning_msg("Attempt to use pub/1 without parse_transform. ?MODULE, ?LINE and Topic will be wrong."),
-    pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
+    pub(Module, self(), Line, Topic, Payload, 'hybrid', generate_complete_routing_name(Module)).
 
 % shortcut (should use parse transform better than pub/2)
--spec pub(Topic, Message) -> Result when
-    Message ::  term(),
+-spec pub(Topic, Payload) -> Result when
     Topic   ::  binary(),
-    Result  ::  pubresult().
+    Payload ::  payload(),
+    Result  ::  pub_result().
 
-pub(Topic, Message) ->
+pub(Topic, Payload) ->
     Module = ?MODULE,
     Line = ?LINE,
     error_logger:warning_msg("Attempt to use pub/2 without parse_transform. ?MODULE and ?LINE will be wrong."),
-    pub(Module, self(), Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
+    pub(Module, self(), Line, Topic, Payload, 'hybrid', generate_complete_routing_name(Module)).
 
 % hybrid
--spec pub(Module, Process, Line, Topic, Message) -> Result when
+-spec pub(Module, Process, Line, Topic, Payload) -> Result when
     Module  ::  module(),
     Process ::  proc(),
     Line    ::  pos_integer(),
     Topic   ::  binary(),
-    Message ::  term(),
-    Result  ::  pubresult().
+    Payload ::  payload(),
+    Result  ::  pub_result().
 
-pub(Module, Process, Line, Topic, Message) ->
+pub(Module, Process, Line, Topic, Payload) ->
     error_logger:warning_msg("Attempt to use pub/5 without parse_transform."),
-    pub(Module, Process, Line, Topic, Message, 'hybrid', generate_complete_routing_name(Module)).
+    pub(Module, Process, Line, Topic, Payload, 'hybrid', generate_complete_routing_name(Module)).
 
 % full_async
--spec full_async_pub(Module, Process, Line, Topic, Message) -> Result when
+-spec full_async_pub(Module, Process, Line, Topic, Payload) -> Result when
     Module  ::  module(),
     Process ::  proc(),
     Line    ::  pos_integer(),
     Topic   ::  binary(),
-    Message ::  term(),
+    Payload ::  term(),
     Result  ::  []. % in async we always return [] cuz we don't know yet subscribers
 
-full_async_pub(Module, Process, Line, Topic, Message) ->
-    pub(Module, Process, Line, Topic, Message, async, generate_complete_routing_name(Module)).
+full_async_pub(Module, Process, Line, Topic, Payload) ->
+    pub(Module, Process, Line, Topic, Payload, async, generate_complete_routing_name(Module)).
 
 % full_sync
--spec full_sync_pub(Module, Process, Line, Topic, Message) -> Result when
+-spec full_sync_pub(Module, Process, Line, Topic, Payload) -> Result when
     Module  ::  module(),
     Process ::  proc(),
     Line    ::  pos_integer(),
     Topic   ::  binary(),
-    Message ::  term(),
-    Result  ::  pubresult().
+    Payload ::  term(),
+    Result  ::  pub_result().
 
-full_sync_pub(Module, Process, Line, Topic, Message) ->
-    pub(Module, Process, Line, Topic, Message, sync, generate_complete_routing_name(Module)).
+full_sync_pub(Module, Process, Line, Topic, Payload) ->
+    pub(Module, Process, Line, Topic, Payload, sync, generate_complete_routing_name(Module)).
 
 % @doc full parameter pub
--spec pub(Module, Process, Line, Topic, Message, PubType, EtsName) -> Result when
+-spec pub(Module, Process, Line, Topic, Payload, PubType, EtsName) -> Result when
     Module  ::  module(),
     Process ::  proc(),
     Line    ::  pos_integer(),
     Topic   ::  binary(),
-    Message ::  term(),
+    Payload ::  payload(),
     PubType ::  pubtype(),
     EtsName ::  atom(),
-    Result  ::  pubresult().
+    Result  ::  pub_result().
 
-pub(Module, Process, Line, Topic, Message, hybrid, EtsName) ->
-    WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
+pub(Module, Process, Line, Topic, Payload, hybrid, EtsName) ->
+    WhoGetWhileSync = load_routing_and_send(ets:whereis(EtsName), Topic, Payload, []),
     PostRef = gen_id(),
-    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync, PostRef]),
+    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Payload, EtsName, WhoGetWhileSync, PostRef]),
     WhoGetWhileSync;
 
-pub(Module, Process, Line, Topic, Message, async, EtsName) ->
-    spawn(?MODULE, pub, [Module, Process, Line, Topic, Message, sync, EtsName]),
+pub(Module, Process, Line, Topic, Payload, async, EtsName) ->
+    spawn(?MODULE, pub, [Module, Process, Line, Topic, Payload, sync, EtsName]),
     [];
 
-pub(Module, Process, Line, Topic, Message, sync, EtsName) ->
-    WhoGetWhileSync = load_routing_and_send(EtsName, Topic, Message, []),
-    post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetWhileSync, undefined).
+pub(Module, Process, Line, Topic, Payload, sync, EtsName) ->
+    WhoGetWhileSync = load_routing_and_send(ets:whereis(EtsName), Topic, Payload, []),
+    post_hitcache_routine(Module, Process, Line, Topic, Payload, EtsName, WhoGetWhileSync, undefined).
 
-% load routing recursion
-load_routing_and_send(EtsName, Topic, Message, Acc) ->
-    try ets:lookup(EtsName, Topic) of
+-spec load_routing_and_send(EtsTidOrName, Topic, Payload, Acc) -> Result when
+    EtsTidOrName  :: atom() | ets:tid(),
+    Topic         :: topic(),
+    Payload       :: payload(),
+    Acc           :: pub_result(),
+    Result        :: pub_result().
+
+load_routing_and_send(undefined, _Topic, _Payload, Acc) -> Acc;
+load_routing_and_send(EtsTid, Topic, Payload, Acc) ->
+    try ets:lookup(EtsTid, Topic) of
         [] when Topic =/= <<"*">> ->
-            load_routing_and_send(EtsName, <<"*">>, Message, Acc);
+            load_routing_and_send(EtsTid, <<"*">>, Payload, Acc);
         [] ->
             Acc;
         Routes when Topic =/= <<"*">> ->
             % send to wildcard-topic subscribers
-            load_routing_and_send(EtsName, <<"*">>, Message, send(Routes, Message, Topic, Acc));
+            load_routing_and_send(EtsTid, <<"*">>, Payload, send(Routes, Payload, Topic, Acc));
         Routes ->
-            send(Routes, Message, Topic, Acc)
+            send(Routes, Payload, Topic, Acc)
     catch
         _:_ ->
             Acc
     end.
 
--spec send(Routes, Message, Topic, Acc) -> Result when
+-spec send(Routes, Payload, Topic, Acc) -> Result when
     Routes  ::  [complete_routes()],
-    Message ::  term(),
+    Payload ::  payload(),
     Topic   ::  topic(),
-    Acc     ::  [proc()],
-    Result  ::  [proc()].
+    Acc     ::  pub_result(),
+    Result  ::  pub_result().
 
 % sending to standart process
-send([#complete_routes{dest_type = 'process', method = Method, dest = Process}|T], Message, Topic, Acc) ->
+send([#complete_routes{dest_type = 'process', method = Method, dest = Process}|T], Payload, Topic, Acc) ->
     case Method of
-        info -> Process ! Message;
-        cast -> gen_server:cast(Process, Message);
-        call -> gen_server:call(Process, Message)
+        info -> Process ! Payload;
+        cast -> gen_server:cast(Process, Payload);
+        call -> gen_server:call(Process, Payload)
     end,
-    send(T, Message, Topic, [Process|Acc]);
+    send(T, Payload, Topic, [{Process, Method} | Acc]);
 
 % apply process
-send([#complete_routes{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic}}|T], Message, Topic, Acc) ->
-    send(T, Message, Topic,
-        case Method of
-            cast ->
-				case {is_function(Function), ShellIncludeTopic} of
-                    {true, true} ->
-                        [spawn(fun() -> erlang:apply(Function, [Topic, Message]) end) | Acc];
-                    {true, false} ->
-                        [spawn(fun() -> erlang:apply(Function, [Message]) end) | Acc];
-                    {false, true} ->
-						{Module, StaticFunction, PredefinedArgs} = Function,
-                        [spawn(Module, StaticFunction, [Topic, Message | PredefinedArgs]) | Acc];
-                    {false, false} ->
-						{Module, StaticFunction, PredefinedArgs} = Function,
-                        [spawn(Module, StaticFunction, [Message | PredefinedArgs]) | Acc]
-                end;
-            call ->
-				case {is_function(Function), ShellIncludeTopic} of
-                    {true, true} ->
-                        erlang:apply(Function, [Topic, Message]);
-                    {true, false} ->
-                        erlang:apply(Function, [Message]);
-                    {false, true} ->
-                        {Module, StaticFunction, PredefinedArgs} = Function,
-                        Module:StaticFunction([Topic, Message | PredefinedArgs]);
-					{false, false} ->
-                        {Module, StaticFunction, PredefinedArgs} = Function,
-                        Module:StaticFunction([Message | PredefinedArgs])
-                end,
-                Acc;
-            {Node, cast} when is_atom(Node) ->
-                case ShellIncludeTopic of
-                    true ->
-                        erpc:cast(Node, fun() -> erlang:apply(Function, [Topic, Message]) end);
-                    false ->
-                        erpc:cast(Node, fun() -> erlang:apply(Function, [Message]) end)
-                end,
-                Acc
-        end
-    );
+send([#complete_routes{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic} = Dest}|T], Payload, Topic, Acc) ->
+    case Method of
+        cast ->
+			case {is_function(Function), ShellIncludeTopic} of
+                {true, true} ->
+                    spawn(fun() -> erlang:apply(Function, [Topic, Payload]) end);
+                {true, false} ->
+                    spawn(fun() -> erlang:apply(Function, [Payload]) end);
+                {false, true} ->
+					{Module, StaticFunction, PredefinedArgs} = Function,
+                    spawn(Module, StaticFunction, [Topic, Payload | PredefinedArgs]);
+                {false, false} ->
+					{Module, StaticFunction, PredefinedArgs} = Function,
+                    spawn(Module, StaticFunction, [Payload | PredefinedArgs])
+            end;
+        call ->
+			case {is_function(Function), ShellIncludeTopic} of
+                {true, true} ->
+                    erlang:apply(Function, [Topic, Payload]);
+                {true, false} ->
+                    erlang:apply(Function, [Payload]);
+                {false, true} ->
+                    {Module, StaticFunction, PredefinedArgs} = Function,
+                    Module:StaticFunction([Topic, Payload | PredefinedArgs]);
+				{false, false} ->
+                    {Module, StaticFunction, PredefinedArgs} = Function,
+                    Module:StaticFunction([Payload | PredefinedArgs])
+            end;
+        {Node, cast} when is_atom(Node) ->
+            case ShellIncludeTopic of
+                true ->
+                    erpc:cast(Node, fun() -> erlang:apply(Function, [Topic, Payload]) end);
+                false ->
+                    erpc:cast(Node, fun() -> erlang:apply(Function, [Payload]) end)
+            end
+    end,
+    send(T, Payload, Topic, [{Dest, Method} | Acc]);
 
 % sending to poolboy pool
-send([#complete_routes{dest_type = 'poolboy', method = Method, dest = PoolName}|T], Message, Topic, Acc) ->
-    NewAcc =
-        try
-            Worker = poolboy:checkout(PoolName),
-            case Method of
-                info -> Worker ! Message;
-                cast -> gen_server:cast(Worker, Message);
-                call -> gen_server:call(Worker, Message)
-            end,
-            poolboy:checkin(PoolName, Worker),
-            [Worker | Acc]
-        catch
-            X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
+send([#complete_routes{dest_type = 'poolboy', method = Method, dest = PoolName}|T], Payload, Topic, Acc) ->
+    _ = try
+        Worker = poolboy:checkout(PoolName),
+        case Method of
+            info -> Worker ! Payload;
+            cast -> gen_server:cast(Worker, Payload);
+            call -> gen_server:call(Worker, Payload)
         end,
-    send(T, Message, Topic, NewAcc);
+        poolboy:checkin(PoolName, Worker)
+    catch
+        X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
+    end,
+    send(T, Payload, Topic, [{PoolName, Method} | Acc]);
 
 % final clause for empty list
-send([], _Message, _Topic, Acc) -> Acc.
+send([], _Payload, _Topic, Acc) -> Acc.
 
 % ================================ end of pub part =============================
 % ----------------------------------- sub part ---------------------------------
@@ -498,15 +506,28 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
 % ================================ end of sub part =============================
 % ----------------------------------- unsub part -------------------------------
 
-unsubscribe(_FlowSource,_FlowDest) -> ok. % todo
+% todo
+-spec unsubscribe(FlowSource, FlowDest) -> Result when
+    FlowSource  :: term(),
+    FlowDest    :: term(),
+    Result      :: term().
+unsubscribe(_FlowSource,_FlowDest) -> ok.
 % ================================ end of sub part =============================
-
-
-
 
 % ---------------------------------other functions -----------------------------
 
-post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlready, PostRef) ->
+-spec post_hitcache_routine(Module, Process, Line, Topic, Payload, EtsName, WhoGetAlready, PostRef) -> Result when
+    Module          :: module(),
+    Process         :: pid(),
+    Line            :: pos_integer(),
+    Topic           :: topic(),
+    Payload         :: payload(),
+    EtsName         :: atom(),
+    WhoGetAlready   :: pub_result(),
+    PostRef         :: undefined | reference(),
+    Result          :: term(). % todo
+
+post_hitcache_routine(Module, Process, Line, Topic, Payload, EtsName, WhoGetAlready, PostRef) ->
     Words = split_topic(Topic),
     ProcessToWrite = case is_pid(Process) of
         true ->
@@ -534,8 +555,9 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
     lists:append(WhoGetAlready, lists:map(
         % todo: maybe better use matchspec?
         fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}) ->
-            case lists:member(Dest, WhoGetAlready) of
+            case lists:member({Dest, Method}, WhoGetAlready) of
                 false when PostRef =:= undefined orelse PostRef > SubRef ->
+                    ?LOG_ERROR(io_lib:format("~p",["here"])),
                     ToInsert = #complete_routes{
                         topic = Topic,
                         dest_type = DestType,
@@ -543,7 +565,7 @@ post_hitcache_routine(Module, Process, Line, Topic, Message, EtsName, WhoGetAlre
                         method = Method,
                         parent_topic = {'$erlroute_global_sub', Topic}
                     },
-                    Toreturn = send([ToInsert], Message, Topic, []),
+                    Toreturn = send([ToInsert], Payload, Topic, []),
                     ets:insert(route_table_must_present(EtsName), ToInsert),
                     Toreturn;
                 false when PostRef =/= undefined ->
@@ -615,14 +637,19 @@ is_final_topic(Topic) ->
 
 split_topic(Bin) ->
     split_topic(Bin, [], []).
+
+-spec split_topic(Current, WAcc, ResultAcc) -> Result when
+    Current     :: binary(),
+    WAcc        :: list(),
+    ResultAcc   :: list(),
+    Result      :: nonempty_list().
+
 split_topic(<<>>, WAcc, Result) ->
     lists:reverse([lists:reverse(WAcc)|Result]);
 split_topic(<<2#00101110:8, Rest/binary>>, WAcc, Result) ->
     split_topic(Rest, [], [lists:reverse(WAcc)|Result]);
 split_topic(<<Char:8, Rest/binary>>, WAcc, Result) ->
-    split_topic(Rest, [Char|WAcc], Result);
-split_topic(<<>>, [], []) -> [].
-
+    split_topic(Rest, [Char|WAcc], Result).
 
 % @doc Generate unique id
 -spec gen_id() -> Result when

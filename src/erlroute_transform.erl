@@ -26,6 +26,7 @@ parse_transform(Forms, _Options) ->
     parse_trans:plain_transform(fun do_transform/1, Forms).
 
 % @doc transform erlroute:pub/1
+-spec do_transform(erl_parse:abstract_form()) -> erl_parse:abstract_form() | continue.
 do_transform(
     {call, _,
         {remote, _,

@@ -920,7 +920,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Ack = tutils:recieve_loop(),
                         ?assertEqual([Msg1], Ack),
 
-                        [Dest] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
+                        [{Dest, info}] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
                         timer:sleep(5),
 
                         ?assertEqual(1, ets:info(EtsName, size)),
@@ -974,7 +974,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Ack = tutils:recieve_loop(),
                         ?assertEqual([Msg1], Ack),
 
-                        [Dest] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
+                        [{Dest, info}] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
                         timer:sleep(5),
 
                         ?assertEqual(1, ets:info(EtsName, size)),
