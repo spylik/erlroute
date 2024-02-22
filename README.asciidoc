@@ -1,29 +1,28 @@
 = Erlroute
 
-Erlroute is the simple message router designed for http://www.jpaulmorrison.com/fbp/index.shtml[Flow Based Programming paradigm^].
+Erlroute is the simple router designed for http://www.jpaulmorrison.com/fbp/index.shtml[Flow Based Programming paradigm^].
 
 The main idea is to use `erlroute:pub` everywhere, where you may require the data now or in the future.
 
-Actually, erlroute do simple job - it just route messages and execution flow. Simply write erlroute:pub in places which
+Actually, erlroute do simple job - it just route messages or execution flows. Simply write erlroute:pub in places which
 will require dinamic route and "destination" you can define later.
 
 Destinations could be:
-- other processes
-- functions (local and on remote nodes)
+- other local or remote processes;
+- functions (local and on remote nodes);
 - pool workers
 
 == Why just do not use AMQP broker for this purpose?
 
 1. AMQP brokers are really great! With AMQP you able to implement very flexible and complex solutions. But sometimes, when you just need to route messages inside your erlang application use amqp-broker is like to shoot out of cannon into sparrows. When you do not need full AMQP features, erlroute is here. 
 
-2. AMQP brokers designed for message passing, meanwhile erlroute also able to manage dynamic execution routes within same process.
-
-Erlroute designed to be low-weight, simple, fast and suitable only for manage messages & execution routes inside your Erlang applications.
+2. AMQP brokers designed for message passing and advanced message routine logic, meanwhile erlroute is a simple router
+designed for simple message passing and dynamic execution flows inside your Erlang applications.
 
 == When erlroute useful for you and when not so?
 
-* Erlroute useful if you are going to design dynamically environment where one group of listeners, can be in some cases may require data from producers and in some another cases - do not;
-* Erlroute useful when you want to implement dynamical execution pipelines (flows) within multiple processes or within same;
+* Erlroute useful if you are going to design dynamically environment where one group of listeners, in some cases may require data from producers and in some another cases not;
+* Erlroute useful when you want to implement dynamical execution pipelines (flows) within multiple processes or within the same;
 * Erlroute useful during development - you don't need anymore to think in advance about you may require the data from this line of code somwhere in future or not.
 * Erlroute useful to avoid multi-send constructions like:
 
@@ -53,7 +52,7 @@ erlroute:sub(<<"some_test_topic">>).
 You can also subscribe functions: 
 [source,erlang]
 ----
-erlroute:sub(<<"some_test_topic">>, email, send_email, ["exampl@example.com"]).
+erlroute:sub(<<"some_test_topic">>, some_module_name, send_email, ["exampl@example.com"]).
 erlroute:sub(<<"some_test_topic">>, fun(Topic, Msg) -> do_some_stuff end).
 ----
 
