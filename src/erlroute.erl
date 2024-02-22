@@ -10,7 +10,9 @@
     -compile(export_all).
     -compile(nowarn_export_all).
 -endif.
+
 -define(DEFAULT_TIMEOUT_FOR_RPC, 10000).
+-define(SERVER, ?MODULE).
 
 -include("erlroute.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -42,16 +44,13 @@
 		gen_static_fun_dest/2
     ]).
 
-% we will use ?MODULE as servername
--define(SERVER, ?MODULE).
-
 % ----------------------------- gen_server part --------------------------------
 
 % @doc start api
 -spec start_link() -> Result when
-    Result :: {ok,Pid} | ignore | {error,Error},
-    Pid :: pid(),
-    Error :: {already_started,Pid} | term().
+    Result      :: {ok,Pid} | ignore | {error,Error},
+    Pid         :: pid(),
+    Error       :: {already_started,Pid} | term().
 
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
@@ -64,7 +63,7 @@ stop() ->
 
 % @doc async/sync stop
 -spec stop(Type) -> ok when
-    Type :: 'sync' | 'async'.
+    Type        :: 'sync' | 'async'.
 
 stop(sync) ->
     gen_server:stop(?SERVER);
@@ -97,13 +96,13 @@ init([]) ->
 
 % @doc callbacks for gen_server handle_call.
 -spec handle_call(Message, From, State) -> Result when
-    Message :: SubMsg | UnsubMsg,
-    SubMsg :: {'subscribe', flow_source(), flow_dest()},
-    UnsubMsg :: {'unsubscribe', flow_source(), flow_dest()},
-    From :: {pid(), Tag},
-    Tag :: term(),
-    State :: erlroute_state(),
-    Result :: {reply, Result, State}.
+    Message     :: SubMsg | UnsubMsg,
+    SubMsg      :: {'subscribe', flow_source(), flow_dest()},
+    UnsubMsg    :: {'unsubscribe', flow_source(), flow_dest()},
+    From        :: {pid(), Tag},
+    Tag         :: term(),
+    State       :: erlroute_state(),
+    Result      :: {reply, term(), erlroute_state()}.
 
 handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
     Result = subscribe(FlowSource, FlowDest),
@@ -125,10 +124,10 @@ handle_call(Msg, _From, State) ->
 
 %--------------handle_cast-----------------
 
--spec handle_cast(HandleCastEvents, State) -> Result when
-    HandleCastEvents    :: stop,
-    State               :: erlroute_state(),
-    Result              :: {noreply, State} | {stop, normal, State}.
+-spec handle_cast(Message, State) -> Result when
+    Message     :: stop,
+    State       :: erlroute_state(),
+    Result      :: {noreply, State} | {stop, normal, State}.
 
 handle_cast(stop, State) ->
     {stop, normal, State};
@@ -143,9 +142,9 @@ handle_cast(Msg, State) ->
 
 % @doc callbacks for gen_server handle_info.
 -spec handle_info(Message, State) -> Result when
-    Message :: term(),
-    State   :: term(),
-    Result  :: {noreply, State}.
+    Message     :: {nodeup, node()} | {nodedown, node()},
+    State       :: erlroute_state(),
+    Result      :: {noreply, erlroute_state()}.
 
 % todo: populate to that node our subscribtions
 handle_info({nodeup, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
@@ -171,19 +170,19 @@ handle_info(Msg, State) ->
 %-----------end of handle_info-------------
 
 -spec terminate(Reason, State) -> term() when
-    Reason :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
-    State :: term().
+    Reason      :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
+    State       :: term().
 
 terminate(Reason, State) ->
     {noreply, Reason, State}.
 
 -spec code_change(OldVsn, State, Extra) -> Result when
-    OldVsn :: Vsn | {down, Vsn},
-    Vsn :: term(),
-    State :: term(),
-    Extra :: term(),
-    Result :: {ok, NewState},
-    NewState :: term().
+    OldVsn      :: Vsn | {down, Vsn},
+    Vsn         :: term(),
+    State       :: term(),
+    Extra       :: term(),
+    Result      :: {ok, NewState},
+    NewState    :: term().
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -282,7 +281,7 @@ full_sync_pub(Module, Process, Line, Topic, Payload) ->
     Line    ::  pos_integer(),
     Topic   ::  topic(),
     Payload ::  payload(),
-    PubType ::  pubtype(),
+    PubType ::  pub_type(),
     EtsName ::  atom(),
     Result  ::  pub_result().
 
