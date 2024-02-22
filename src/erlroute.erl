@@ -10,9 +10,11 @@
     -compile(export_all).
     -compile(nowarn_export_all).
 -endif.
+-define(DEFAULT_TIMEOUT_FOR_RPC, 10000).
 
 -include("erlroute.hrl").
 -include_lib("kernel/include/logger.hrl").
+
 -behaviour(gen_server).
 
 % export standart gen_server api
@@ -174,8 +176,8 @@ code_change(_OldVsn, State, _Extra) ->
 
 % @doc Publish message API. Default is hybrid behaviour:
 % - check if route table existing (cache per module)
-% - for cached routes it send message async
-% - at the end it cast to erlroute and erlroute try to match not yet cached routes
+% - for cached routes it send message sync
+% - at the end it cast to erlroute and erlroute try to match not yet cached routes via async way
 %
 % Also aviable 'erlroute:full_async_pub/5' and 'erlroute:full_sync_pub/5' with same parameters.
 %
@@ -192,7 +194,7 @@ code_change(_OldVsn, State, _Extra) ->
 % Return: return depends on what kind of behaviour has choosen.
 % - for hybrid it return list of process where erlroute send message matched from cache. It doesn't include post-matching.
 % - for async it always return empty list.
-% - for sync it return full list of destination processes where erlroute actually send message.
+% - for sync it return full list of destination where erlroute actually route payload.
 
 
 % shortcut (should use parse transform better than pub/1)
@@ -209,7 +211,7 @@ pub(Payload) ->
 
 % shortcut (should use parse transform better than pub/2)
 -spec pub(Topic, Payload) -> Result when
-    Topic   ::  binary(),
+    Topic   ::  topic(),
     Payload ::  payload(),
     Result  ::  pub_result().
 
@@ -224,7 +226,7 @@ pub(Topic, Payload) ->
     Module  ::  module(),
     Process ::  proc(),
     Line    ::  pos_integer(),
-    Topic   ::  binary(),
+    Topic   ::  topic(),
     Payload ::  payload(),
     Result  ::  pub_result().
 
@@ -237,8 +239,8 @@ pub(Module, Process, Line, Topic, Payload) ->
     Module  ::  module(),
     Process ::  proc(),
     Line    ::  pos_integer(),
-    Topic   ::  binary(),
-    Payload ::  term(),
+    Topic   ::  topic(),
+    Payload ::  payload(),
     Result  ::  []. % in async we always return [] cuz we don't know yet subscribers
 
 full_async_pub(Module, Process, Line, Topic, Payload) ->
@@ -249,8 +251,8 @@ full_async_pub(Module, Process, Line, Topic, Payload) ->
     Module  ::  module(),
     Process ::  proc(),
     Line    ::  pos_integer(),
-    Topic   ::  binary(),
-    Payload ::  term(),
+    Topic   ::  topic(),
+    Payload ::  payload(),
     Result  ::  pub_result().
 
 full_sync_pub(Module, Process, Line, Topic, Payload) ->
@@ -261,7 +263,7 @@ full_sync_pub(Module, Process, Line, Topic, Payload) ->
     Module  ::  module(),
     Process ::  proc(),
     Line    ::  pos_integer(),
-    Topic   ::  binary(),
+    Topic   ::  topic(),
     Payload ::  payload(),
     PubType ::  pubtype(),
     EtsName ::  atom(),
@@ -278,8 +280,16 @@ pub(Module, Process, Line, Topic, Payload, async, EtsName) ->
     [];
 
 pub(Module, Process, Line, Topic, Payload, sync, EtsName) ->
-    WhoGetWhileSync = load_routing_and_send(ets:whereis(EtsName), Topic, Payload, []),
-    post_hitcache_routine(Module, Process, Line, Topic, Payload, EtsName, WhoGetWhileSync, undefined).
+    post_hitcache_routine(
+        Module,
+        Process,
+        Line,
+        Topic,
+        Payload,
+        EtsName,
+        load_routing_and_send(ets:whereis(EtsName), Topic, Payload, []),
+        undefined
+    ).
 
 -spec load_routing_and_send(EtsTidOrName, Topic, Payload, Acc) -> Result when
     EtsTidOrName  :: atom() | ets:tid(),
@@ -356,6 +366,19 @@ send([#complete_routes{dest_type = 'function', method = Method, dest = {Function
                     erpc:cast(Node, fun() -> erlang:apply(Function, [Topic, Payload]) end);
                 false ->
                     erpc:cast(Node, fun() -> erlang:apply(Function, [Payload]) end)
+            end;
+        {Node, call} when is_atom(Node) ->
+			case {is_function(Function), ShellIncludeTopic} of
+                {true, true} ->
+                    erpc:call(Node, fun() -> erlang:apply(Function, [Topic, Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
+                {true, false} ->
+                    erpc:call(Node, fun() -> erlang:apply(Function, [Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
+                {false, true} ->
+                    {Module, StaticFunction, PredefinedArgs} = Function,
+                    erpc:call(Node, Module, StaticFunction, [Topic, Payload | PredefinedArgs], ?DEFAULT_TIMEOUT_FOR_RPC);
+				{false, false} ->
+                    {Module, StaticFunction, PredefinedArgs} = Function,
+                    erpc:call(Node, Module, StaticFunction, [Topic, Payload | PredefinedArgs], ?DEFAULT_TIMEOUT_FOR_RPC)
             end
     end,
     send(T, Payload, Topic, [{Dest, Method} | Acc]);
@@ -387,7 +410,7 @@ send([], _Payload, _Topic, Acc) -> Acc.
 % For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
 
 -spec sub(Target) -> ok when
-    Target  :: flow_source() | nonempty_list() | binary() | module().
+    Target  :: flow_source() | nonempty_list() | topic() | module().
 
 % @doc subscribe current process to all messages from module Module
 sub(Module) when is_atom(Module) -> sub(#flow_source{module = Module, topic = <<"*">>}, {process, self(), info});
@@ -400,7 +423,7 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 
 % @doc full subscribtion api
 -spec sub(FlowSource, FlowDest) -> ok when
-    FlowSource  :: flow_source() | nonempty_list() | binary() | module(),
+    FlowSource  :: flow_source() | nonempty_list() | topic() | module(),
     FlowDest    :: flow_dest()
                  | pid()
                  | atom()
@@ -557,7 +580,6 @@ post_hitcache_routine(Module, Process, Line, Topic, Payload, EtsName, WhoGetAlre
         fun(#subscribers_by_topic_only{dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}) ->
             case lists:member({Dest, Method}, WhoGetAlready) of
                 false when PostRef =:= undefined orelse PostRef > SubRef ->
-                    ?LOG_ERROR(io_lib:format("~p",["here"])),
                     ToInsert = #complete_routes{
                         topic = Topic,
                         dest_type = DestType,
