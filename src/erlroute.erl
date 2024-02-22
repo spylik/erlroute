@@ -72,25 +72,26 @@ stop(async) ->
     gen_server:cast(?SERVER, stop).
 
 % @doc gen_server init. We going to create ETS tables for dynamic routing rules in init section
--spec init([]) -> {ok, undefined}.
+-spec init([]) -> {ok, erlroute_state()}.
 
 init([]) ->
-    _ = ets:new('$erlroute_topics', [
+    TopicsTid = ets:new('$erlroute_topics', [
             bag,
             public, % public for support full sync pub
             {read_concurrency, true}, % todo: test does it affect performance for writes?
             {keypos, #topics.topic},
             named_table
         ]),
-    _ = ets:new('$erlroute_global_sub', [
+    GlobalSubTid = ets:new('$erlroute_global_sub', [
             bag,
             public, % public for support full sync pub,
             {read_concurrency, true}, % todo: test doesrt affect performance for writes?
             {keypos, #subscribers_by_topic_only.topic},
             named_table
         ]),
-
-    {ok, undefined}.
+    _ = net_kernel:monitor_nodes(true),
+    Nodes = discover_erlroute_nodes(),
+    {ok, #erlroute_state{erlroute_topics_ets = TopicsTid, erlroute_global_sub_ets = GlobalSubTid, erlroute_nodes = Nodes}}.
 
 %--------------handle_call-----------------
 
@@ -101,7 +102,7 @@ init([]) ->
     UnsubMsg :: {'unsubscribe', flow_source(), flow_dest()},
     From :: {pid(), Tag},
     Tag :: term(),
-    State :: erleventer_state(),
+    State :: erlroute_state(),
     Result :: {reply, Result, State}.
 
 handle_call({subscribe, FlowSource, FlowDest}, _From, State) ->
@@ -126,7 +127,7 @@ handle_call(Msg, _From, State) ->
 
 -spec handle_cast(HandleCastEvents, State) -> Result when
     HandleCastEvents    :: stop,
-    State               :: erleventer_state(),
+    State               :: erlroute_state(),
     Result              :: {noreply, State} | {stop, normal, State}.
 
 handle_cast(stop, State) ->
@@ -145,6 +146,22 @@ handle_cast(Msg, State) ->
     Message :: term(),
     State   :: term(),
     Result  :: {noreply, State}.
+
+% todo: populate to that node our subscribtions
+handle_info({nodeup, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
+    try erpc:call(Node, erlang, function_exported, [?MODULE, start_link], ?DEFAULT_TIMEOUT_FOR_RPC) of
+        true ->
+            {noreply, State#erlroute_state{erlroute_nodes = lists:uniq([Node | Nodes])}};
+        false ->
+            {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}}
+    catch
+        _:_ ->
+            {noreply, State}
+    end;
+
+% todo: unsubscribe that node after some timeout
+handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
+    {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}};
 
 % @doc case for unknown messages
 handle_info(Msg, State) ->
@@ -704,3 +721,42 @@ gen_static_fun_dest(Node, MFA) ->
 		_:_ ->
 			erpc:call(Node, ?MODULE, gen_static_fun_dest, ['$local', MFA], 1000)
 	end.
+
+% @doc Discrover erlang nodes which have erlroute
+-spec discover_erlroute_nodes() -> Result when
+    Result  :: [node()].
+
+discover_erlroute_nodes() ->
+    case node() of
+        nonode@nohost ->
+            [];
+        _SomeNodeName ->
+            Nodes = nodes(),
+            case length(Nodes) of
+                0 ->
+                    [];
+                _NotNull ->
+                    lists:foldl(fun
+                        ({Node, {ok, true}}, Acc) ->
+                            [Node | Acc];
+                        ({_Node, {ok, false}}, Acc) ->
+                            Acc;
+                        ({_Node, _OtherResp}, Acc) ->
+                            Acc
+                        end,
+                        [],
+                        lists:zip(
+                            Nodes,
+                            erpc:multicall(
+                              Nodes,
+                              erlang,
+                              function_exported,
+                              [?MODULE, start_link, 0],
+                              ?DEFAULT_TIMEOUT_FOR_RPC
+                            )
+                        )
+                    )
+            end
+    end.
+
+

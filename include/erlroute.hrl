@@ -12,13 +12,19 @@
         topic/0
     ]).
 
--type erleventer_state()            :: undefined.
+-record(erlroute_state, {
+        erlroute_topics_ets :: ets:tid(),
+        erlroute_global_sub_ets :: ets:tid(),
+        erlroute_nodes = [] :: [node()]
+    }).
+
+-type erlroute_state()            :: #erlroute_state{}.
 
 -type pubtype()                     :: 'sync' | 'async' | 'hybrid'.
 -type topic()                       :: binary().
 -type proc()                        :: pid() | atom().
--type fun_dest()                    :: {fun() | static_function(), shell_include_topic()}.
--type shell_include_topic()         :: boolean().
+-type fun_dest()                    :: {fun() | static_function(), shall_include_topic()}.
+-type shall_include_topic()         :: boolean().
 -type payload()                     :: term().
 
 -type static_function() :: {module(), atom(), extra_arguments()}.
