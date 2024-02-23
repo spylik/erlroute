@@ -40,7 +40,7 @@
         sub/2,
         sub/1,
         generate_complete_routing_name/1, % export support function for parse_transform
-        post_hitcache_routine/8,
+        post_hitcache_routine/9,
 		gen_static_fun_dest/2
     ]).
 
@@ -285,70 +285,97 @@ full_sync_pub(Module, Process, Line, Topic, Payload) ->
     EtsName ::  atom(),
     Result  ::  pub_result().
 
-pub(Module, Process, Line, Topic, Payload, hybrid, EtsName) ->
-    WhoGetWhileSync = load_routing_and_send(ets:whereis(EtsName), Topic, Payload, []),
+pub(Module, Process, Line, Topic, Payload, hybrid = PubType, EtsName) ->
+    WhoGetWhileSync = load_routing_and_send(
+        ets:whereis(EtsName),
+        Module,
+        Process,
+        Line,
+		PubType,
+        Topic,
+        Payload,
+        []
+    ),
     PostRef = gen_id(),
-    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, Topic, Payload, EtsName, WhoGetWhileSync, PostRef]),
+    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetWhileSync, PostRef]),
     WhoGetWhileSync;
 
 pub(Module, Process, Line, Topic, Payload, async, EtsName) ->
     spawn(?MODULE, pub, [Module, Process, Line, Topic, Payload, sync, EtsName]),
     [];
 
-pub(Module, Process, Line, Topic, Payload, sync, EtsName) ->
+pub(Module, Process, Line, Topic, Payload, sync = PubType, EtsName) ->
     post_hitcache_routine(
         Module,
         Process,
         Line,
+		PubType,
         Topic,
         Payload,
         EtsName,
-        load_routing_and_send(ets:whereis(EtsName), Topic, Payload, []),
+        load_routing_and_send(
+        	ets:whereis(EtsName),
+        	Module,
+        	Process,
+          	Line,
+			PubType,
+          	Topic,
+          	Payload,
+          	[]
+        ),
         undefined
     ).
 
--spec load_routing_and_send(EtsTidOrName, Topic, Payload, Acc) -> Result when
-    EtsTidOrName  :: atom() | ets:tid(),
-    Topic         :: topic(),
-    Payload       :: payload(),
-    Acc           :: pub_result(),
-    Result        :: pub_result().
+-spec load_routing_and_send(EtsTidOrName, Module, Process, Line, PubType, Topic, Payload, Acc) -> Result when
+    EtsTidOrName 	:: atom() | ets:tid(),
+	Module		 	:: module(),
+	Process		  	:: proc(),
+	Line			:: pos_integer(),
+	PubType 		:: pub_type(),
+    Topic         	:: topic(),
+    Payload       	:: payload(),
+    Acc           	:: pub_result(),
+    Result        	:: pub_result().
 
-load_routing_and_send(undefined, _Topic, _Payload, Acc) -> Acc;
-load_routing_and_send(EtsTid, Topic, Payload, Acc) ->
+load_routing_and_send(undefined, _Module, _Process, _Line, _PubType, _Topic, _Payload, Acc) -> Acc;
+load_routing_and_send(EtsTid, Module, Process, Line, PubType, Topic, Payload, Acc) ->
     try ets:lookup(EtsTid, Topic) of
         [] when Topic =/= <<"*">> ->
-            load_routing_and_send(EtsTid, <<"*">>, Payload, Acc);
+            load_routing_and_send(EtsTid, Module, Process, Line, PubType, <<"*">>, Payload, Acc);
         [] ->
             Acc;
         Routes when Topic =/= <<"*">> ->
             % send to wildcard-topic subscribers
-            load_routing_and_send(EtsTid, <<"*">>, Payload, send(Routes, Payload, Topic, Acc));
+            load_routing_and_send(EtsTid, Module, Process, Line, PubType, <<"*">>, Payload, send(Routes, Payload, Module, Process, Line, PubType, Topic, Acc));
         Routes ->
-            send(Routes, Payload, Topic, Acc)
+            send(Routes, Payload, Module, Process, Line, PubType, Topic, Acc)
     catch
         _:_ ->
             Acc
     end.
 
--spec send(Routes, Payload, Topic, Acc) -> Result when
-    Routes  ::  [complete_routes()],
-    Payload ::  payload(),
-    Topic   ::  topic(),
-    Acc     ::  pub_result(),
-    Result  ::  pub_result().
+-spec send(Routes, Payload, Module, Process, Line, PubType, Topic, Acc) -> Result when
+    Routes  		:: [complete_routes()],
+    Payload 		:: payload(),
+	Module 			:: module(),
+	Process			:: proc(),
+	Line			:: pos_integer(),
+	PubType			:: pub_type(),
+    Topic   		:: topic(),
+    Acc     		:: pub_result(),
+    Result  		:: pub_result().
 
 % sending to standart process
-send([#complete_routes{dest_type = 'process', method = Method, dest = Process}|T], Payload, Topic, Acc) ->
+send([#complete_routes{dest_type = 'process', method = Method, dest = Process}|T], Payload, Module, Process, Line, PubType, Topic, Acc) ->
     case Method of
         info -> Process ! Payload;
         cast -> gen_server:cast(Process, Payload);
         call -> gen_server:call(Process, Payload)
     end,
-    send(T, Payload, Topic, [{Process, Method} | Acc]);
+    send(T, Payload, Module, Process, Line, PubType, Topic, [{Process, Method} | Acc]);
 
 % apply process
-send([#complete_routes{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic} = Dest}|T], Payload, Topic, Acc) ->
+send([#complete_routes{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, Acc) ->
     case Method of
         cast ->
 			case {is_function(Function), ShellIncludeTopic} of
@@ -397,10 +424,10 @@ send([#complete_routes{dest_type = 'function', method = Method, dest = {Function
                     erpc:call(Node, Module, StaticFunction, [Topic, Payload | PredefinedArgs], ?DEFAULT_TIMEOUT_FOR_RPC)
             end
     end,
-    send(T, Payload, Topic, [{Dest, Method} | Acc]);
+    send(T, Payload, Module, Process, Line, PubType, Topic, [{Dest, Method} | Acc]);
 
 % sending to poolboy pool
-send([#complete_routes{dest_type = 'poolboy', method = Method, dest = PoolName}|T], Payload, Topic, Acc) ->
+send([#complete_routes{dest_type = 'poolboy', method = Method, dest = PoolName}|T], Payload, Module, Process, Line, PubType, Topic, Acc) ->
     _ = try
         Worker = poolboy:checkout(PoolName),
         case Method of
@@ -412,10 +439,10 @@ send([#complete_routes{dest_type = 'poolboy', method = Method, dest = PoolName}|
     catch
         X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
     end,
-    send(T, Payload, Topic, [{PoolName, Method} | Acc]);
+    send(T, Payload, Module, Process, Line, PubType, Topic, [{PoolName, Method} | Acc]);
 
 % final clause for empty list
-send([], _Payload, _Topic, Acc) -> Acc.
+send([], _Payload, _Module, _Process, _Line, _PubType, _Topic, Acc) -> Acc.
 
 % ================================ end of pub part =============================
 % ----------------------------------- sub part ---------------------------------
@@ -493,12 +520,11 @@ sub(FlowSource, FlowDest) when is_list(FlowSource) ->
             end
         }, FlowDest).
 
-
--spec subscribe(FlowSource,FlowDest) -> ok when
+% @doc internal subscribe routine
+-spec subscribe(FlowSource, FlowDest) -> ok when
     FlowSource  ::  flow_source() | nonempty_list(),
     FlowDest    ::  flow_dest().
 
-% @doc subscribe with undefined module
 subscribe(#flow_source{module = undefined, topic = Topic}, {DestType, Dest, Method}) ->
     {IsFinal, Words} = is_final_topic(Topic),
     ets:insert('$erlroute_global_sub', #subscribers_by_topic_only{
@@ -555,10 +581,11 @@ unsubscribe(_FlowSource,_FlowDest) -> ok.
 
 % ---------------------------------other functions -----------------------------
 
--spec post_hitcache_routine(Module, Process, Line, Topic, Payload, EtsName, WhoGetAlready, PostRef) -> Result when
+-spec post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetAlready, PostRef) -> Result when
     Module          :: module(),
     Process         :: pid(),
     Line            :: pos_integer(),
+	PubType			:: pub_type(),
     Topic           :: topic(),
     Payload         :: payload(),
     EtsName         :: atom(),
@@ -566,7 +593,7 @@ unsubscribe(_FlowSource,_FlowDest) -> ok.
     PostRef         :: undefined | reference(),
     Result          :: term(). % todo
 
-post_hitcache_routine(Module, Process, Line, Topic, Payload, EtsName, WhoGetAlready, PostRef) ->
+post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetAlready, PostRef) ->
     Words = split_topic(Topic),
     ProcessToWrite = case is_pid(Process) of
         true ->
@@ -603,7 +630,7 @@ post_hitcache_routine(Module, Process, Line, Topic, Payload, EtsName, WhoGetAlre
                         method = Method,
                         parent_topic = {'$erlroute_global_sub', Topic}
                     },
-                    Toreturn = send([ToInsert], Payload, Topic, []),
+                    Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, []),
                     ets:insert(route_table_must_present(EtsName), ToInsert),
                     Toreturn;
                 false when PostRef =/= undefined ->

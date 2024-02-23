@@ -20,6 +20,7 @@
 -type topic()                   :: binary().
 -type proc()                    :: pid() | atom().
 -type fun_dest()                :: {fun() | static_function(), shall_include_topic()}.
+-type other_node_dest()         :: node().
 -type shall_include_topic()     :: boolean().
 -type payload()                 :: term().
 
@@ -31,14 +32,14 @@
 -type delivery_method()         :: proc_delivery_method() | function_delivery_method().
 
 -type ets_name()                :: atom().
--type desttype()                :: 'process' | 'poolboy' | 'function'.
+-type dest_type()               :: 'process' | 'poolboy' | 'function' | 'erlroute_on_other_node'.
 -type pub_result()              :: [{dest(), delivery_method()}].
 -type function_name()           :: atom().
--type dest()                    :: proc() | fun_dest().
+-type dest()                    :: proc() | fun_dest() | other_node_dest().
 
 % only for cache for final topics (generated with module name)
 -record(complete_routes, {
-        dest_type               :: desttype(),
+        dest_type               :: dest_type(),
         method = 'info'         :: delivery_method(),
         dest                    :: dest(),
         topic                   :: topic(),
@@ -50,7 +51,7 @@
 
 % only for parametrize routes (generated with module name)
 -record(parametrize_routes, {
-        dest_type               :: desttype(),
+        dest_type               :: dest_type(),
         method = 'info'         :: delivery_method(),
         dest                    :: dest(),
         topic                   :: topic(),
@@ -62,7 +63,7 @@
         topic                   :: topic(),
         is_final_topic = true   :: boolean(),
         words = 'undefined'     :: 'undefined' | nonempty_list(),
-        dest_type               :: desttype(),
+        dest_type               :: dest_type(),
         dest                    :: dest(),
         method = 'info'         :: delivery_method(),
         sub_ref                 :: integer()
