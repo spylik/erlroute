@@ -393,11 +393,11 @@ send([#complete_routes{dest_type = 'function', method = Method, dest = {Function
                 {true, false} ->
                     spawn(fun() -> erlang:apply(Function, [Payload]) end);
                 {false, true} ->
-					{Module, StaticFunction, PredefinedArgs} = Function,
-                    spawn(Module, StaticFunction, [Topic, Payload | PredefinedArgs]);
+					{M, F, A} = Function,
+                    spawn(M, F, [Topic, Payload | A]);
                 {false, false} ->
-					{Module, StaticFunction, PredefinedArgs} = Function,
-                    spawn(Module, StaticFunction, [Payload | PredefinedArgs])
+					{M, F, A} = Function,
+                    spawn(M, F, [Payload | A])
             end;
         call ->
 			case {is_function(Function), ShellIncludeTopic} of
@@ -406,11 +406,11 @@ send([#complete_routes{dest_type = 'function', method = Method, dest = {Function
                 {true, false} ->
                     erlang:apply(Function, [Payload]);
                 {false, true} ->
-                    {Module, StaticFunction, PredefinedArgs} = Function,
-                    Module:StaticFunction([Topic, Payload | PredefinedArgs]);
+					{M, F, A} = Function,
+                    apply(M, F, [Topic, Payload | A]);
 				{false, false} ->
-                    {Module, StaticFunction, PredefinedArgs} = Function,
-                    Module:StaticFunction([Payload | PredefinedArgs])
+					{M, F, A} = Function,
+                    apply(M, F, [Payload | A])
             end;
         {Node, cast} when is_atom(Node) ->
             case ShellIncludeTopic of
@@ -426,11 +426,11 @@ send([#complete_routes{dest_type = 'function', method = Method, dest = {Function
                 {true, false} ->
                     erpc:call(Node, fun() -> erlang:apply(Function, [Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
                 {false, true} ->
-                    {Module, StaticFunction, PredefinedArgs} = Function,
-                    erpc:call(Node, Module, StaticFunction, [Topic, Payload | PredefinedArgs], ?DEFAULT_TIMEOUT_FOR_RPC);
+					{M, F, A} = Function,
+                    erpc:call(Node, M, F, [Topic, Payload | A], ?DEFAULT_TIMEOUT_FOR_RPC);
 				{false, false} ->
-                    {Module, StaticFunction, PredefinedArgs} = Function,
-                    erpc:call(Node, Module, StaticFunction, [Topic, Payload | PredefinedArgs], ?DEFAULT_TIMEOUT_FOR_RPC)
+					{M, F, A} = Function,
+                    erpc:call(Node, M, F, [Topic, Payload | A], ?DEFAULT_TIMEOUT_FOR_RPC)
             end
     end,
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
