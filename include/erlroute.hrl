@@ -9,8 +9,6 @@
     ]).
 
 -record(erlroute_state, {
-        erlroute_topics_ets     :: ets:tid(),
-        erlroute_global_sub_ets :: ets:tid(),
         erlroute_nodes = []     :: [node()]
     }).
 
@@ -29,7 +27,7 @@
 
 -type proc_delivery_method()    :: 'info' | 'cast' | 'call'.
 -type function_delivery_method():: {node(), 'cast' | 'call'}.
--type delivery_method()         :: proc_delivery_method() | function_delivery_method().
+-type delivery_method()         :: proc_delivery_method() | function_delivery_method() | pub_type_based.
 
 -type ets_name()                :: atom().
 -type dest_type()               :: 'process' | 'poolboy' | 'function' | 'erlroute_on_other_node'.
@@ -61,12 +59,12 @@
 % for non-module specific subscribes
 -record(subscribers_by_topic_only, {
         topic                   :: topic(),
-        is_final_topic = true   :: boolean(),
-        words = 'undefined'     :: 'undefined' | nonempty_list(),
+        is_final_topic = true   :: boolean() | '_',
+        words = 'undefined'     :: 'undefined' | nonempty_list() | '_',
         dest_type               :: dest_type(),
         dest                    :: dest(),
         method = 'info'         :: delivery_method(),
-        sub_ref                 :: integer()
+        sub_ref                 :: integer() | '_'
     }).
 
 -record(topics, {
@@ -84,6 +82,7 @@
 
 -type flow_source()             :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
 -type flow_dest()               :: {process, proc(), proc_delivery_method()}
-                                | {function, fun_dest(), function_delivery_method()}.
+                                |  {function, fun_dest(), function_delivery_method()}
+                                |  {erlroute_on_other_node, node(), pub_type_based}.
 
 

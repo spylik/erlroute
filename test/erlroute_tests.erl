@@ -874,6 +874,11 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                 [],
                                 [true]
                             }],
+                        ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS)),
+
+                        % try to subscibe again (it should not create dupe)
+                        erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
+                        timer:sleep(5),
                         ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS))
                 end},
                 {<<"Global subscribe to specified topic and then pub test">>,
