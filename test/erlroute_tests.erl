@@ -105,11 +105,11 @@ erlroute_non_started_test_() ->
                             ets:info('$erlroute_topics')
                         )
                     end},
-                 {<<"When erlroute doesn't start, ets-table '$erlroute_global_sub' must be undefined">>,
+                 {<<"When erlroute doesn't start, ets-table '$erlroute_subscribers' must be undefined">>,
                     fun() ->
                         ?assertEqual(
                             undefined,
-                            ets:info('$erlroute_global_sub')
+                            ets:info('$erlroute_subscribers')
                         )
                     end},
                 {<<"When erlroute doesn't start, process erlroute must be unregistered">>,
@@ -184,11 +184,11 @@ erlroute_started_test_() ->
                         )
                     end
                 },
-                {<<"When erlroute start, ets-table '$erlroute_global_sub' must be present">>,
+                {<<"When erlroute start, ets-table '$erlroute_subscribers' must be present">>,
                     fun() ->
                         ?assertNotEqual(
                             undefined,
-                            ets:info('$erlroute_global_sub')
+                            ets:info('$erlroute_subscribers')
                         )
                     end
                 }
@@ -359,7 +359,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub(Module),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -380,10 +380,10 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = '$erlroute_global_sub',
+                        EtsTable = '$erlroute_subscribers',
                         erlroute:sub(Topic),
                         MS = [{
-                                #subscribers_by_topic_only{
+                                #subscriber{
                                     topic = Topic,
                                     is_final_topic = true,
                                     words = undefined,
@@ -406,10 +406,10 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = '$erlroute_global_sub',
+                        EtsTable = '$erlroute_subscribers',
                         erlroute:sub(Topic),
                         MS = [{
-                                #subscribers_by_topic_only{
+                                #subscriber{
                                     topic = Topic,
                                     is_final_topic = false,
                                     words = ["testtopic0","!","testtopic1"],
@@ -436,7 +436,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{module, Module},{topic, Topic}]),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -460,7 +460,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{module, Module}]),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = <<"*">>,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -481,10 +481,10 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = '$erlroute_global_sub',
+                        EtsTable = '$erlroute_subscribers',
                         erlroute:sub([{topic, Topic}]),
                         MS = [{
-                                #subscribers_by_topic_only{
+                                #subscriber{
                                     topic = Topic,
                                     is_final_topic = true,
                                     words = undefined,
@@ -511,7 +511,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{module, Module}, {topic, Topic}], Dest),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -536,7 +536,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{module, Module}, {topic, Topic}], Dest),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -561,7 +561,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub(Module, {DestType, Dest, Method}),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -582,10 +582,10 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = '$erlroute_global_sub',
+                        EtsTable = '$erlroute_subscribers',
                         erlroute:sub(Topic, {DestType, Dest, Method}),
                         MS = [{
-                                #subscribers_by_topic_only{
+                                #subscriber{
                                     topic = Topic,
                                     is_final_topic = true,
                                     words = undefined,
@@ -612,7 +612,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -637,7 +637,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         EtsTable = erlroute:generate_complete_routing_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -664,7 +664,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -691,7 +691,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         erlroute:sub([{module, Module}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
-                                #complete_routes{
+                                #cached_route{
                                     topic = Topic,
                                     dest_type = DestType,
                                     dest = Dest,
@@ -723,7 +723,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          timer:sleep(5),
                          MS = [{
-                                 #complete_routes{
+                                 #cached_route{
                                      topic = Topic,
                                      dest_type = DestType,
                                      dest = Dest,
@@ -745,21 +745,22 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_parametrized_routing_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
-                                #parametrize_routes{
+                                #subscriber{
                                     topic = Topic,
+                                    module = Module,
                                     dest_type = DestType,
                                     dest = Dest,
                                     method = Method,
-                                    words = ["testtopic","*","test1","test3"]
+                                    words = ["testtopic","*","test1","test3"],
+                                    _ = '_'
                                 },
                                 [],
                                 [true]
                             }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS))
+                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS))
                     end},
                 {<<"Erlroute able to deliver message to single subscriber with exactly the same topic">>,
                     fun() ->
@@ -850,7 +851,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         ?assertEqual(lists:sort([Msg1,Msg2]), lists:sort(Ack)),
                         Dest ! stop
                 end},
-                {<<"Should have entry in ets '$erlroute_global_sub' after subscribe to specified topic globally">>,
+                {<<"Should have entry in ets '$erlroute_subscribers' after subscribe to specified topic globally">>,
                     fun() ->
                         % source
                         Topic = <<"testmegatopic">>,
@@ -862,7 +863,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
-                                #subscribers_by_topic_only{
+                                #subscriber{
                                     topic = Topic,
                                     is_final_topic = true,
                                     words = 'undefined',
@@ -874,12 +875,12 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                 [],
                                 [true]
                             }],
-                        ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS)),
+                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS)),
 
                         % try to subscibe again (it should not create dupe)
                         erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
                         timer:sleep(5),
-                        ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS))
+                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS))
                 end},
                 {<<"Global subscribe to specified topic and then pub test">>,
                     fun() ->
@@ -897,7 +898,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
-                                #subscribers_by_topic_only{
+                                #subscriber{
                                     topic = Topic,
                                     is_final_topic = true,
                                     words = 'undefined',
@@ -909,7 +910,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                 [],
                                 [true]
                             }],
-                        ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS)),
+                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS)),
 
                         EtsName = erlroute:generate_complete_routing_name(Module),
 
@@ -955,7 +956,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 
                         erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
                         MS = [{
-                                #subscribers_by_topic_only{
+                                #subscriber{
                                     topic = Topic,
                                     is_final_topic = true,
                                     words = 'undefined',
@@ -967,7 +968,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                 [],
                                 [true]
                             }],
-                        ?assertEqual(1, ets:select_count('$erlroute_global_sub', MS)),
+                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS)),
 
                         _ = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
 
@@ -990,7 +991,11 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest ! stop
                     end}
 
-%
+
+
+
+
+
 %                {<<"After sync unsub/6, ets table must do not contain route entry">>,
 %                    fun() ->
 %                        Type = by_module_name,
@@ -1000,7 +1005,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                        DestType = pid,
 %                        EtsTable = erlroute:generate_complete_routing_name(Type, Source),
 %                        MS = [{
-%                                #complete_routes{
+%                                #cached_route{
 %                                    topic = Topic,
 %                                    dest = Dest,
 %                                    dest_type = DestType
@@ -1024,7 +1029,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       DestType = pid,
 %                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
 %                       MS = [{
-%                               #complete_routes{
+%                               #cached_route{
 %                                   topic = Topic,
 %                                   dest = Dest,
 %                                   dest_type = DestType
@@ -1049,7 +1054,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       DestType = pid,
 %                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
 %                       MS = [{
-%                               #complete_routes{
+%                               #cached_route{
 %                                   topic = Topic,
 %                                   dest = Dest,
 %                                   dest_type = DestType
@@ -1074,7 +1079,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       DestType = pid,
 %                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
 %                       MS = [{
-%                               #complete_routes{
+%                               #cached_route{
 %                                   topic = Topic,
 %                                   dest = Dest,
 %                                   dest_type = DestType
@@ -1089,7 +1094,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       timer:sleep(75), % for async cast
 %                       ?assertEqual(0, ets:select_count(EtsTable, MS))
 %                   end}
-%
+
              ]
          }
      }.

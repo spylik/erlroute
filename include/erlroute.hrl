@@ -36,7 +36,7 @@
 -type dest()                    :: proc() | fun_dest() | other_node_dest().
 
 % only for cache for final topics (generated with module name)
--record(complete_routes, {
+-record(cached_route, {
         dest_type               :: dest_type(),
         method = 'info'         :: delivery_method(),
         dest                    :: dest(),
@@ -45,20 +45,12 @@
             = 'undefined'       :: 'undefined' | {ets_name(), binary()}
     }).
 
--type complete_routes() :: #complete_routes{}.
-
-% only for parametrize routes (generated with module name)
--record(parametrize_routes, {
-        dest_type               :: dest_type(),
-        method = 'info'         :: delivery_method(),
-        dest                    :: dest(),
-        topic                   :: topic(),
-        words                   :: nonempty_list()
-    }).
+-type cached_route() :: #cached_route{}.
 
 % for non-module specific subscribes
--record(subscribers_by_topic_only, {
+-record(subscriber, {
         topic                   :: topic(),
+        module                  :: module(),
         is_final_topic = true   :: boolean() | '_',
         words = 'undefined'     :: 'undefined' | nonempty_list() | '_',
         dest_type               :: dest_type(),
