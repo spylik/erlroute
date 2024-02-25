@@ -38,24 +38,24 @@
 % only for cache for final topics (generated with module name)
 -record(cached_route, {
         dest_type               :: dest_type(),
-        method = 'info'         :: delivery_method(),
+        method = 'info'         :: delivery_method() | '_',
         dest                    :: dest(),
-        topic                   :: topic(),
+        topic                   :: topic() | '_',
         parent_topic
-            = 'undefined'       :: 'undefined' | {ets_name(), binary()}
+            = 'undefined'       :: 'undefined' | {ets_name(), binary()} | '_'
     }).
 
 -type cached_route() :: #cached_route{}.
 
 % for non-module specific subscribes
 -record(subscriber, {
-        topic                   :: topic(),
-        module                  :: module(),
+        topic                   :: topic() | '_',
+        module                  :: module() | '_',
         is_final_topic = true   :: boolean() | '_',
         words = 'undefined'     :: 'undefined' | nonempty_list() | '_',
         dest_type               :: dest_type(),
         dest                    :: dest(),
-        method = 'info'         :: delivery_method(),
+        method = 'info'         :: delivery_method() | '_',
         sub_ref                 :: integer() | '_'
     }).
 

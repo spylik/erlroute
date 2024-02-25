@@ -11,6 +11,8 @@
     -compile(nowarn_export_all).
 -endif.
 
+-define(SUBETS, '$erlroute_subscribers').
+
 -define(DEFAULT_TIMEOUT_FOR_RPC, 10000).
 -define(SERVER, ?MODULE).
 
@@ -41,7 +43,7 @@
         sub/1,
         generate_per_module_cache_table_etc_name/1, % export support function for parse_transform
         post_hitcache_routine/9,
-		gen_static_fun_dest/2,
+        gen_static_fun_dest/2,
         fetch_flow_sources/0
     ]).
 
@@ -82,7 +84,7 @@ init([]) ->
             {keypos, #topics.topic},
             named_table
         ]),
-    _ = ets:new('$erlroute_subscribers', [
+    _ = ets:new(?SUBETS, [
             bag,
             public, % public for support full sync pub,
             {read_concurrency, true}, % todo: test doesrt affect performance for writes?
@@ -91,7 +93,7 @@ init([]) ->
         ]),
     _ = net_kernel:monitor_nodes(true),
     Nodes = discover_erlroute_nodes(),
-	_ = fetch_subscribtions_from_remote_nodes(Nodes),
+    _ = fetch_subscribtions_from_remote_nodes(Nodes),
     {ok, #erlroute_state{erlroute_nodes = Nodes}}.
 
 %--------------handle_call-----------------
@@ -151,18 +153,25 @@ handle_cast(Msg, State) ->
 
 % todo: populate to that node our subscribtions
 handle_info({nodeup, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
-    try erpc:call(Node, erlang, function_exported, [?MODULE, start_link], ?DEFAULT_TIMEOUT_FOR_RPC) of
+    case node() =/= Node of
         true ->
-            {noreply, State#erlroute_state{erlroute_nodes = lists:uniq([Node | Nodes])}};
+            try erpc:call(Node, erlang, function_exported, [?MODULE, start_link, 0], ?DEFAULT_TIMEOUT_FOR_RPC) of
+                true ->
+                    _ = fetch_subscribtions_from_remote_nodes([Node]),
+                    {noreply, State#erlroute_state{erlroute_nodes = lists:uniq([Node | Nodes])}};
+                false ->
+                    {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}}
+            catch
+                _:_ ->
+                    {noreply, State}
+            end;
         false ->
-            {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}}
-    catch
-        _:_ ->
             {noreply, State}
     end;
 
 % todo: unsubscribe that node after some timeout
 handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
+    _ = unsubscribe_node(Node),
     {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}};
 
 handle_info({subscribe_from_remote, FlowSource, Node}, State) ->
@@ -299,7 +308,7 @@ pub(Module, Process, Line, Topic, Payload, hybrid = PubType, EtsName) ->
         Module,
         Process,
         Line,
-		PubType,
+        PubType,
         Topic,
         Payload,
         []
@@ -317,35 +326,35 @@ pub(Module, Process, Line, Topic, Payload, sync = PubType, EtsName) ->
         Module,
         Process,
         Line,
-		PubType,
+        PubType,
         Topic,
         Payload,
         EtsName,
         load_routing_and_send(
-        	ets:whereis(EtsName),
+            ets:whereis(EtsName),
             EtsName,
-        	Module,
-        	Process,
-          	Line,
-			PubType,
-          	Topic,
-          	Payload,
-          	[]
+            Module,
+            Process,
+            Line,
+            PubType,
+            Topic,
+            Payload,
+            []
         ),
         undefined
     ).
 
 -spec load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Payload, Acc) -> Result when
-    EtsTid 	        :: undefined | ets:tid(),
+    EtsTid          :: undefined | ets:tid(),
     EtsName         :: atom(),
-	Module		 	:: module(),
-	Process		  	:: proc(),
-	Line			:: pos_integer(),
-	PubType 		:: pub_type(),
-    Topic         	:: topic(),
-    Payload       	:: payload(),
-    Acc           	:: pub_result(),
-    Result        	:: pub_result().
+    Module          :: module(),
+    Process         :: proc(),
+    Line            :: pos_integer(),
+    PubType         :: pub_type(),
+    Topic           :: topic(),
+    Payload         :: payload(),
+    Acc             :: pub_result(),
+    Result          :: pub_result().
 
 load_routing_and_send(undefined, _EtsName, _Module, _Process, _Line, _PubType, _Topic, _Payload, Acc) -> Acc;
 load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Payload, Acc) ->
@@ -365,16 +374,16 @@ load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Pa
     end.
 
 -spec send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) -> Result when
-    Routes  		:: [cached_route()],
-    Payload 		:: payload(),
-	Module 			:: module(),
-	Process			:: proc(),
-	Line			:: pos_integer(),
-	PubType			:: pub_type(),
-    Topic   		:: topic(),
+    Routes          :: [cached_route()],
+    Payload         :: payload(),
+    Module          :: module(),
+    Process         :: proc(),
+    Line            :: pos_integer(),
+    PubType         :: pub_type(),
+    Topic           :: topic(),
     EtsName         :: atom(),
-    Acc     		:: pub_result(),
-    Result  		:: pub_result().
+    Acc             :: pub_result(),
+    Result          :: pub_result().
 
 % sending to standart process
 send([#cached_route{dest_type = 'process', method = Method, dest = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
@@ -389,29 +398,29 @@ send([#cached_route{dest_type = 'process', method = Method, dest = Dest}|T], Pay
 send([#cached_route{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
     case Method of
         cast ->
-			case {is_function(Function), ShellIncludeTopic} of
+            case {is_function(Function), ShellIncludeTopic} of
                 {true, true} ->
                     spawn(fun() -> erlang:apply(Function, [Topic, Payload]) end);
                 {true, false} ->
                     spawn(fun() -> erlang:apply(Function, [Payload]) end);
                 {false, true} ->
-					{M, F, A} = Function,
+                    {M, F, A} = Function,
                     spawn(M, F, [Topic, Payload | A]);
                 {false, false} ->
-					{M, F, A} = Function,
+                    {M, F, A} = Function,
                     spawn(M, F, [Payload | A])
             end;
         call ->
-			case {is_function(Function), ShellIncludeTopic} of
+            case {is_function(Function), ShellIncludeTopic} of
                 {true, true} ->
                     erlang:apply(Function, [Topic, Payload]);
                 {true, false} ->
                     erlang:apply(Function, [Payload]);
                 {false, true} ->
-					{M, F, A} = Function,
+                    {M, F, A} = Function,
                     apply(M, F, [Topic, Payload | A]);
-				{false, false} ->
-					{M, F, A} = Function,
+                {false, false} ->
+                    {M, F, A} = Function,
                     apply(M, F, [Payload | A])
             end;
         {Node, cast} when is_atom(Node) ->
@@ -422,16 +431,16 @@ send([#cached_route{dest_type = 'function', method = Method, dest = {Function, S
                     erpc:cast(Node, fun() -> erlang:apply(Function, [Payload]) end)
             end;
         {Node, call} when is_atom(Node) ->
-			case {is_function(Function), ShellIncludeTopic} of
+            case {is_function(Function), ShellIncludeTopic} of
                 {true, true} ->
                     erpc:call(Node, fun() -> erlang:apply(Function, [Topic, Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
                 {true, false} ->
                     erpc:call(Node, fun() -> erlang:apply(Function, [Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
                 {false, true} ->
-					{M, F, A} = Function,
+                    {M, F, A} = Function,
                     erpc:call(Node, M, F, [Topic, Payload | A], ?DEFAULT_TIMEOUT_FOR_RPC);
-				{false, false} ->
-					{M, F, A} = Function,
+                {false, false} ->
+                    {M, F, A} = Function,
                     erpc:call(Node, M, F, [Topic, Payload | A], ?DEFAULT_TIMEOUT_FOR_RPC)
             end
     end,
@@ -553,7 +562,7 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
         [],
         ['$_']
     }],
-    EtsTid = ets:whereis('$erlroute_subscribers'),
+    EtsTid = ets:whereis(?SUBETS),
     _ = case ets:select(EtsTid, MS) of
         [] ->
             {IsFinal, Words} = is_final_topic(Topic),
@@ -569,28 +578,28 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
             }),
             _ = case IsFinal of
                 true ->
-					case Module of
-						undefined ->
-		                    lists:map(fun
-		                        (#topics{module = TopicModule}) when TopicModule =:= Module orelse Module =:= undefined ->
-		                            ets:insert(route_table_must_present(generate_per_module_cache_table_etc_name(Module)),
-		                                #cached_route{
-		                                    topic = Topic,
-		                                    dest_type = DestType,
-		                                    dest = Dest,
-		                                    method = Method,
-		                                    parent_topic = {'$erlroute_subscribers', Topic}
-		                                }
-		                            );
-		                        (_NotMatch) ->
-		                            false
-		                    end, ets:lookup('$erlroute_topics',Topic));
-						_NotUndefined ->
-		            		ets:insert(
-		                		route_table_must_present(generate_per_module_cache_table_etc_name(Module)),
-		                		#cached_route{topic = Topic, dest_type = DestType, dest = Dest, method = Method}
-		            		)
-					end;
+                    case Module of
+                        undefined ->
+                            lists:map(fun
+                                (#topics{module = TopicModule}) when TopicModule =:= Module orelse Module =:= undefined ->
+                                    ets:insert(route_table_must_present(generate_per_module_cache_table_etc_name(Module)),
+                                        #cached_route{
+                                            topic = Topic,
+                                            dest_type = DestType,
+                                            dest = Dest,
+                                            method = Method,
+                                            parent_topic = {?SUBETS, Topic}
+                                        }
+                                    );
+                                (_NotMatch) ->
+                                    false
+                            end, ets:lookup('$erlroute_topics',Topic));
+                        _NotUndefined ->
+                            ets:insert(
+                                route_table_must_present(generate_per_module_cache_table_etc_name(Module)),
+                                #cached_route{topic = Topic, dest_type = DestType, dest = Dest, method = Method}
+                            )
+                    end;
                 false -> todo % implement matcher for parametrized topics
             end;
         _NotEmpty ->
@@ -614,7 +623,7 @@ unsubscribe(_FlowSource,_FlowDest) -> ok.
     Module          :: module(),
     Process         :: pid(),
     Line            :: pos_integer(),
-	PubType			:: pub_type(),
+    PubType         :: pub_type(),
     Topic           :: topic(),
     Payload         :: payload(),
     EtsName         :: atom(),
@@ -650,20 +659,20 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
         fun(#subscriber{module = SubscriberModule, dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}, Acc) ->
             case lists:member({Dest, Method}, WhoGetAlready) of
                 false when (PostRef =:= undefined orelse PostRef > SubRef) andalso (Module =:= SubscriberModule orelse SubscriberModule =:= undefined) ->
-		        	ToInsert = #cached_route{
-		                topic = Topic,
-		                dest_type = DestType,
-		                dest = Dest,
-		                method = Method,
-		                parent_topic = {'$erlroute_subscribers', Topic}
-		            },
-		            Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, []),
-		            ets:insert(route_table_must_present(EtsName), ToInsert),
-		            Toreturn;
+                    ToInsert = #cached_route{
+                        topic = Topic,
+                        dest_type = DestType,
+                        dest = Dest,
+                        method = Method,
+                        parent_topic = {?SUBETS, Topic}
+                    },
+                    Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, []),
+                    ets:insert(route_table_must_present(EtsName), ToInsert),
+                    Toreturn;
                 _NoMatch ->
                     Acc
             end
-        end, WhoGetAlready, ets:lookup('$erlroute_subscribers', Topic)
+        end, WhoGetAlready, ets:lookup(?SUBETS, Topic)
     ).
 
 
@@ -673,7 +682,7 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
     EtsName ::  atom().
 
 generate_per_module_cache_table_etc_name(Module) when is_atom(Module)->
-    list_to_atom("$erlroute_cmp_" ++ atom_to_list(Module)).
+    list_to_atom("$erlroute_cache_" ++ atom_to_list(Module)).
 
 % @doc Check if ets routing table is present, on falure - let's create it
 -spec route_table_must_present (EtsName) -> Result when
@@ -741,30 +750,30 @@ split_topic(<<Char:8, Rest/binary>>, WAcc, Result) ->
 gen_id() -> erlang:monotonic_time().
 
 -spec gen_static_fun_dest(Node, StaticFunction) -> Result when
-	Node			:: '$local' | node(),
-	StaticFunction	:: static_function(),
-	Result			:: fun_dest().
+    Node            :: '$local' | node(),
+    StaticFunction  :: static_function(),
+    Result          :: fun_dest().
 
 gen_static_fun_dest('$local', {Module, Function, PredefinedArgs} = MFA) ->
-	ExtraArgsLength = length(PredefinedArgs),
+    ExtraArgsLength = length(PredefinedArgs),
     case erlang:function_exported(Module, Function, ExtraArgsLength + 2) of
-		true ->
-			{MFA, true};
-		false ->
-			case erlang:function_exported(Module, Function, ExtraArgsLength + 1) of
-				true ->
-					{MFA, false};
-				false ->
-					throw(unknown_function)
-			end
-	end;
+        true ->
+            {MFA, true};
+        false ->
+            case erlang:function_exported(Module, Function, ExtraArgsLength + 1) of
+                true ->
+                    {MFA, false};
+                false ->
+                    throw(unknown_function)
+            end
+    end;
 gen_static_fun_dest(Node, MFA) ->
-	try
-		gen_static_fun_dest('$local', MFA)
-	catch
-		_:_ ->
-			erpc:call(Node, ?MODULE, gen_static_fun_dest, ['$local', MFA], 1000)
-	end.
+    try
+        gen_static_fun_dest('$local', MFA)
+    catch
+        _:_ ->
+            erpc:call(Node, ?MODULE, gen_static_fun_dest, ['$local', MFA], 1000)
+    end.
 
 % @doc Discrover erlang nodes which have erlroute
 -spec discover_erlroute_nodes() -> Result when
@@ -804,8 +813,8 @@ discover_erlroute_nodes() ->
     end.
 
 -spec fetch_subscribtions_from_remote_nodes(Nodes) -> Result when
-	Nodes	:: [node()],
-	Result	:: term().
+    Nodes   :: [node()],
+    Result  :: term().
 
 fetch_subscribtions_from_remote_nodes([]) -> false;
 fetch_subscribtions_from_remote_nodes(Nodes) ->
@@ -814,12 +823,12 @@ fetch_subscribtions_from_remote_nodes(Nodes) ->
             false;
         ({Node, {ok, FlowSources}}) when is_list(FlowSources) ->
             lists:map(fun
-				(FlowSource) ->
-					subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based})
-				end,
-			FlowSources);
+                (FlowSource) ->
+                    subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based})
+                end,
+            FlowSources);
         ({_Node, _OtherResp}) ->
-			false
+            false
         end,
         lists:zip(
             Nodes,
@@ -831,7 +840,40 @@ fetch_subscribtions_from_remote_nodes(Nodes) ->
               ?DEFAULT_TIMEOUT_FOR_RPC
             )
         )
-	).
+    ).
+
+-spec unsubscribe_node(Node) -> Result when
+    Node    :: node(),
+    Result  :: term(). % todo
+
+unsubscribe_node(Node) ->
+    ets:match_delete(?SUBETS, #subscriber{dest_type = erlroute_on_other_node, dest = Node, _ = '_'}),
+    lists:foreach(fun(CacheEtsName) ->
+        ets:match_delete(CacheEtsName, #cached_route{dest_type = erlroute_on_other_node, dest = Node, _ = '_'})
+    end, erlroute_cache_etses()).
+
+-spec erlroute_cache_etses() -> Result when
+    Result  :: [atom()].
+
+erlroute_cache_etses() ->
+    lists:foldl(fun
+        (EtsName, Acc) when is_atom(EtsName) ->
+            case atom_to_binary(EtsName) of
+                <<"$erlroute_cache_", Module/binary>> ->
+                    try
+                        _ = binary_to_existing_atom(Module),
+                        [EtsName | Acc]
+                    catch
+                        _:_ -> Acc
+                    end;
+                _Other ->
+                    Acc
+            end;
+        (_EtsTid, Acc) -> Acc
+        end,
+        [],
+        ets:all()
+    ).
 
 -spec fetch_flow_sources() -> Result when
     Result  :: [flow_source()].
@@ -843,4 +885,4 @@ fetch_flow_sources() ->
         (#subscriber{topic = Topic, module = Module}, Acc) ->
             [#flow_source{module = Module, topic = Topic} | Acc]
         end,
-    [], ets:tab2list('$erlroute_subscribers')).
+    [], ets:tab2list(?SUBETS)).

@@ -125,7 +125,7 @@ erlroute_non_started_test_() ->
                         Source = test_producer,
                         ?assertEqual(
                             erlroute:generate_per_module_cache_table_etc_name(Source),
-                            '$erlroute_cmp_test_producer'
+                            '$erlroute_cache_test_producer'
                         )
                     end}
             ]
