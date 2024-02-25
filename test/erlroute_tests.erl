@@ -400,7 +400,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                 {<<"After sub/1 with binary as parameter erlroute must subscribed to all modules, specified topic (topic with parameters)">>,
                     fun() ->
                         % source
-                        Topic = <<"testtopic0.!.testtopic1">>,
+                        Topic = <<"testtopic0.#.testtopic1">>,
                         % dest
                         DestType = process,
                         Dest = self(),
@@ -412,7 +412,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                                 #subscriber{
                                     topic = Topic,
                                     is_final_topic = false,
-                                    words = ["testtopic0","!","testtopic1"],
+                                    words = ["testtopic0","#","testtopic1"],
                                     dest_type = DestType,
                                     dest = Dest,
                                     method = Method,
@@ -1150,7 +1150,7 @@ parse_transform_test_() ->
 split_topic_test() ->
     ?assertEqual(["*"], erlroute:split_topic(<<"*">>)),
     ?assertEqual(["test1","test2"], erlroute:split_topic(<<"test1.test2">>)),
-    ?assertEqual(["test1","!","test2"], erlroute:split_topic(<<"test1.!.test2">>)),
+    ?assertEqual(["test1","#","test2"], erlroute:split_topic(<<"test1.#.test2">>)),
     ?assertEqual(["test1","*","test2"], erlroute:split_topic(<<"test1.*.test2">>)),
     ?assertEqual(["test1","*"], erlroute:split_topic(<<"test1.*">>)),
     ?assertEqual(["*","test1"], erlroute:split_topic(<<"*.test1">>)).

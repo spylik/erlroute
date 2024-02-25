@@ -707,9 +707,10 @@ route_table_must_present(EtsName) ->
     Result :: {boolean(), Words},
     Words :: 'undefined' | nonempty_list().
 
-is_final_topic(<<"*">>) -> {true, undefined};
+is_final_topic(<<$*>>) -> {true, undefined};
+is_final_topic(<<$#>>) -> {true, undefined};
 is_final_topic(Topic) ->
-    case binary:match(Topic, [<<"*">>,<<"!">>]) of
+    case binary:match(Topic, [<<"*">>,<<"#">>]) of
         nomatch -> {true, undefined};
         _ -> {false, split_topic(Topic)}
     end.
