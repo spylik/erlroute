@@ -120,11 +120,11 @@ erlroute_non_started_test_() ->
                         )
                     end},
 
-                {<<"generate_complete_routing_name must generate correct ets table name when Type is by_module_name">>,
+                {<<"generate_per_module_cache_table_etc_name must generate correct ets table name when Type is by_module_name">>,
                     fun() ->
                         Source = test_producer,
                         ?assertEqual(
-                            erlroute:generate_complete_routing_name(Source),
+                            erlroute:generate_per_module_cache_table_etc_name(Source),
                             '$erlroute_cmp_test_producer'
                         )
                     end}
@@ -356,7 +356,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub(Module),
                         MS = [{
                                 #cached_route{
@@ -433,7 +433,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub([{module, Module},{topic, Topic}]),
                         MS = [{
                                 #cached_route{
@@ -457,7 +457,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub([{module, Module}]),
                         MS = [{
                                 #cached_route{
@@ -508,7 +508,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub([{module, Module}, {topic, Topic}], Dest),
                         MS = [{
                                 #cached_route{
@@ -533,7 +533,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = testregisteredprocess,
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub([{module, Module}, {topic, Topic}], Dest),
                         MS = [{
                                 #cached_route{
@@ -558,7 +558,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub(Module, {DestType, Dest, Method}),
                         MS = [{
                                 #cached_route{
@@ -609,7 +609,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                         MS = [{
                                 #cached_route{
@@ -634,7 +634,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         MS = [{
                                 #cached_route{
@@ -660,7 +660,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
@@ -687,7 +687,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = self(),
                         Method = info,
 
-                        EtsTable = erlroute:generate_complete_routing_name(Module),
+                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                         erlroute:sub([{module, Module}], {DestType, Dest, Method}),
                         timer:sleep(5),
                         MS = [{
@@ -714,7 +714,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                          Dest = self(),
                          Method = info,
 
-                         EtsTable = erlroute:generate_complete_routing_name(Module),
+                         EtsTable = erlroute:generate_per_module_cache_table_etc_name(Module),
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
                          erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
@@ -912,7 +912,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                             }],
                         ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS)),
 
-                        EtsName = erlroute:generate_complete_routing_name(Module),
+                        EtsName = erlroute:generate_per_module_cache_table_etc_name(Module),
 
                         ?assertEqual(undefined,ets:info(EtsName)),
 
@@ -947,7 +947,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
                         Dest = tutils:spawn_wait_loop(Self),
                         Method = info,
                         Msg1 = make_ref(),
-                        EtsName = erlroute:generate_complete_routing_name(Module),
+                        EtsName = erlroute:generate_per_module_cache_table_etc_name(Module),
 
                         [] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
 
@@ -1003,7 +1003,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                        Topic = <<"*">>,
 %                        Dest = self(),
 %                        DestType = pid,
-%                        EtsTable = erlroute:generate_complete_routing_name(Type, Source),
+%                        EtsTable = erlroute:generate_per_module_cache_table_etc_name(Type, Source),
 %                        MS = [{
 %                                #cached_route{
 %                                    topic = Topic,
@@ -1027,7 +1027,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       Topic = <<"*">>,
 %                       Dest = self(),
 %                       DestType = pid,
-%                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
+%                       EtsTable = erlroute:generate_per_module_cache_table_etc_name(Type, Source),
 %                       MS = [{
 %                               #cached_route{
 %                                   topic = Topic,
@@ -1052,7 +1052,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       Topic = <<"*">>,
 %                       Dest = self(),
 %                       DestType = pid,
-%                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
+%                       EtsTable = erlroute:generate_per_module_cache_table_etc_name(Type, Source),
 %                       MS = [{
 %                               #cached_route{
 %                                   topic = Topic,
@@ -1077,7 +1077,7 @@ erlroute_simple_defined_module_full_topic_messaging_test_() ->
 %                       Topic = <<"*">>,
 %                       Dest = self(),
 %                       DestType = pid,
-%                       EtsTable = erlroute:generate_complete_routing_name(Type, Source),
+%                       EtsTable = erlroute:generate_per_module_cache_table_etc_name(Type, Source),
 %                       MS = [{
 %                               #cached_route{
 %                                   topic = Topic,

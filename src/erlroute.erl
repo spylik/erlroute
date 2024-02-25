@@ -39,7 +39,7 @@
         full_sync_pub/5,
         sub/2,
         sub/1,
-        generate_complete_routing_name/1, % export support function for parse_transform
+        generate_per_module_cache_table_etc_name/1, % export support function for parse_transform
         post_hitcache_routine/9,
 		gen_static_fun_dest/2,
         fetch_flow_sources/0
@@ -230,7 +230,7 @@ pub(Payload) ->
     Line = ?LINE,
     Topic = list_to_binary(lists:concat([Module,",",Line])),
     error_logger:warning_msg("Attempt to use pub/1 without parse_transform. ?MODULE, ?LINE and Topic will be wrong."),
-    pub(Module, self(), Line, Topic, Payload, 'hybrid', generate_complete_routing_name(Module)).
+    pub(Module, self(), Line, Topic, Payload, 'hybrid', generate_per_module_cache_table_etc_name(Module)).
 
 % shortcut (should use parse transform better than pub/2)
 -spec pub(Topic, Payload) -> Result when
@@ -242,7 +242,7 @@ pub(Topic, Payload) ->
     Module = ?MODULE,
     Line = ?LINE,
     error_logger:warning_msg("Attempt to use pub/2 without parse_transform. ?MODULE and ?LINE will be wrong."),
-    pub(Module, self(), Line, Topic, Payload, 'hybrid', generate_complete_routing_name(Module)).
+    pub(Module, self(), Line, Topic, Payload, 'hybrid', generate_per_module_cache_table_etc_name(Module)).
 
 % hybrid
 -spec pub(Module, Process, Line, Topic, Payload) -> Result when
@@ -255,7 +255,7 @@ pub(Topic, Payload) ->
 
 pub(Module, Process, Line, Topic, Payload) ->
     error_logger:warning_msg("Attempt to use pub/5 without parse_transform."),
-    pub(Module, Process, Line, Topic, Payload, 'hybrid', generate_complete_routing_name(Module)).
+    pub(Module, Process, Line, Topic, Payload, 'hybrid', generate_per_module_cache_table_etc_name(Module)).
 
 % full_async
 -spec full_async_pub(Module, Process, Line, Topic, Payload) -> Result when
@@ -267,7 +267,7 @@ pub(Module, Process, Line, Topic, Payload) ->
     Result  ::  []. % in async we always return [] cuz we don't know yet subscribers
 
 full_async_pub(Module, Process, Line, Topic, Payload) ->
-    pub(Module, Process, Line, Topic, Payload, async, generate_complete_routing_name(Module)).
+    pub(Module, Process, Line, Topic, Payload, async, generate_per_module_cache_table_etc_name(Module)).
 
 % full_sync
 -spec full_sync_pub(Module, Process, Line, Topic, Payload) -> Result when
@@ -279,7 +279,7 @@ full_async_pub(Module, Process, Line, Topic, Payload) ->
     Result  ::  pub_result().
 
 full_sync_pub(Module, Process, Line, Topic, Payload) ->
-    pub(Module, Process, Line, Topic, Payload, sync, generate_complete_routing_name(Module)).
+    pub(Module, Process, Line, Topic, Payload, sync, generate_per_module_cache_table_etc_name(Module)).
 
 % @doc full parameter pub
 -spec pub(Module, Process, Line, Topic, Payload, PubType, EtsName) -> Result when
@@ -573,7 +573,7 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
 						undefined ->
 		                    lists:map(fun
 		                        (#topics{module = TopicModule}) when TopicModule =:= Module orelse Module =:= undefined ->
-		                            ets:insert(route_table_must_present(generate_complete_routing_name(Module)),
+		                            ets:insert(route_table_must_present(generate_per_module_cache_table_etc_name(Module)),
 		                                #cached_route{
 		                                    topic = Topic,
 		                                    dest_type = DestType,
@@ -587,7 +587,7 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
 		                    end, ets:lookup('$erlroute_topics',Topic));
 						_NotUndefined ->
 		            		ets:insert(
-		                		route_table_must_present(generate_complete_routing_name(Module)),
+		                		route_table_must_present(generate_per_module_cache_table_etc_name(Module)),
 		                		#cached_route{topic = Topic, dest_type = DestType, dest = Dest, method = Method}
 		            		)
 					end;
@@ -660,10 +660,7 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
 		            Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, []),
 		            ets:insert(route_table_must_present(EtsName), ToInsert),
 		            Toreturn;
-                false when PostRef =/= undefined ->
-                    error_logger:error_msg("Face race condition when Subscribe reference ~p is Lower than pub_ref ~p\n",[SubRef, PostRef]),
-					Acc;
-                _ ->
+                _NoMatch ->
                     Acc
             end
         end, WhoGetAlready, ets:lookup('$erlroute_subscribers', Topic)
@@ -671,11 +668,11 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
 
 
 % @doc generate ets name for Module for completed topics
--spec generate_complete_routing_name(Module) -> EtsName when
+-spec generate_per_module_cache_table_etc_name(Module) -> EtsName when
     Module  ::  module(),
     EtsName ::  atom().
 
-generate_complete_routing_name(Module) when is_atom(Module)->
+generate_per_module_cache_table_etc_name(Module) when is_atom(Module)->
     list_to_atom("$erlroute_cmp_" ++ atom_to_list(Module)).
 
 % @doc Check if ets routing table is present, on falure - let's create it
