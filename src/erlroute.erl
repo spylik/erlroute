@@ -98,7 +98,7 @@ init([]) ->
 
 %--------------handle_call-----------------
 
-% @doc callbacks for gen_server handle_call.
+ %@doc callbacks for gen_server handle_call.
 -spec handle_call(Message, From, State) -> Result when
     Message     :: SubMsg | UnsubMsg,
     SubMsg      :: {'subscribe', flow_source(), flow_dest()},
@@ -108,13 +108,14 @@ init([]) ->
     State       :: erlroute_state(),
     Result      :: {reply, term(), erlroute_state()}.
 
-handle_call({subscribe, FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlrouteNodes} = State) ->
+handle_call({subscribe, FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlrouteNodes, monitors = Monitors} = State) ->
+    ProbablyMoreMonitors = may_establish_monitor(FlowDest, Monitors),
     Result = subscribe(FlowSource, FlowDest),
     _ = erpc:multicall(ErlrouteNodes, erlang, send, [erlroute, {subscribe_from_remote, FlowSource, node()}], ?DEFAULT_TIMEOUT_FOR_RPC),
-    {reply, Result, State};
+    {reply, Result, State#erlroute_state{monitors = ProbablyMoreMonitors}};
 
-handle_call({unsubscribe, FlowSource, FlowDest}, _From, State) ->
-    unsubscribe(FlowSource, FlowDest),
+handle_call({unsubscribe, FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlRouteNodes} = State) ->
+    unsubscribe(FlowSource, FlowDest, ErlRouteNodes),
     {reply, ok, State};
 
 handle_call({regtable, EtsName}, _From, State) ->
@@ -126,6 +127,7 @@ handle_call(Msg, _From, State) ->
     {reply, ok, State}.
 
 %-----------end of handle_call-------------
+
 
 %--------------handle_cast-----------------
 
@@ -177,6 +179,10 @@ handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) -
 handle_info({subscribe_from_remote, FlowSource, Node}, State) ->
     _ = subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based}),
     {noreply, State};
+
+handle_info({'DOWN', _Ref, process, Pid, _Reason}, #erlroute_state{monitors = Monitors, erlroute_nodes = ErlRouteNodes} = State) ->
+    unsubscribe(all, {process, Pid}, ErlRouteNodes),
+    {noreply, State#erlroute_state{monitors = maps:remove(Pid, Monitors)}};
 
 % @doc case for unknown messages
 handle_info(Msg, State) ->
@@ -610,11 +616,47 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
 % ----------------------------------- unsub part -------------------------------
 
 % todo
--spec unsubscribe(FlowSource, FlowDest) -> Result when
-    FlowSource  :: term(),
-    FlowDest    :: term(),
-    Result      :: term().
-unsubscribe(_FlowSource,_FlowDest) -> ok.
+-spec unsubscribe(FlowSource, FlowDest, ErlRouteNodes) -> Result when
+    FlowSource      :: flow_source() | all,
+    FlowDest        :: {process, proc()}| {function, fun_dest()} | flow_dest(),
+    ErlRouteNodes   :: [node()],
+    Result          :: term().
+
+unsubscribe(all, {DestType, Dest}, ErlRouteNodes) ->
+    TopicsAndModules = ets:select(
+        ?SUBETS,
+        [{
+            #subscriber{dest_type = DestType, dest = Dest, _ = '_'},
+            [],
+            ['$_']
+        }]
+    ),
+    error_logger:warning_msg("Subscriber topics is ~p\n",[TopicsAndModules]),
+
+    ets:match_delete(?SUBETS, #subscriber{dest_type = DestType, dest = Dest, _ = '_'}),
+    lists:foreach(fun(CacheEtsName) ->
+        ets:match_delete(CacheEtsName, #cached_route{dest_type = DestType, dest = Dest, _ = '_'})
+    end, erlroute_cache_etses()),
+
+    % cleanup on other nodes
+    lists:foreach(fun(#subscriber{topic = Topic, module = Module}) ->
+        case ets:match(?SUBETS, #subscriber{topic = Topic, module = Module, _ = '_'}) of
+            [] ->
+                erpc:multicast(
+                    ErlRouteNodes,
+                    ?MODULE,
+                    unsub,
+                    [#flow_source{topic = Topic, module = Module}, {erlroute_on_other_node, node(), pub_type_based}]
+                );
+            _HaveRecord ->
+                error_logger:warning_msg("have other records\n",[]),
+                false
+        end
+    end, TopicsAndModules);
+
+
+unsubscribe(FlowSource, {DestType, Dest, _DeliveryMethod}, ErlRouteNodes) -> unsubscribe(FlowSource, {DestType, Dest}, ErlRouteNodes).
+
 % ================================ end of sub part =============================
 
 % ---------------------------------other functions -----------------------------
@@ -876,7 +918,7 @@ erlroute_cache_etses() ->
     ).
 
 -spec fetch_flow_sources() -> Result when
-    Result  :: [flow_source()].
+    Result      :: [flow_source()].
 
 fetch_flow_sources() ->
     lists:foldl(fun
@@ -886,3 +928,21 @@ fetch_flow_sources() ->
             [#flow_source{module = Module, topic = Topic} | Acc]
         end,
     [], ets:tab2list(?SUBETS)).
+
+% @doc if subsctiber is a process PId, let's establish monitor and unsubscribe when subscriber dies.
+% if subscriber is a registered process, we will keep subscribtion up, as another process may be registered with the same name, so
+% no-resubscribtion will be needed.
+% @end
+
+-spec may_establish_monitor(Dest, Monitors) -> Result when
+    Dest        :: flow_dest(),
+    Monitors    :: #{pid() => reference()},
+    Result      :: #{pid() => reference()}.
+
+may_establish_monitor({process, Proc, _DeliveryMethod}, Monitors) when is_pid(Proc) ->
+    maps:put(Proc, erlang:monitor(process, Proc), Monitors);
+
+may_establish_monitor(_NotMatch, Monitors) -> Monitors.
+
+
+

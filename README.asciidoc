@@ -59,17 +59,21 @@ erlroute:sub(<<"some_test_topic">>, fun(Topic, Msg) -> do_some_stuff end).
 * Erlroute not useful if you are going to produce data which may required by applications written in other languages. In this case the best way is to use AMQP-broker. Erlroute designed only for internal erlang routes.
 
 == Erlroute for erlang-driven evolutionary neural networks and genetic algorithms.
-Erlroute actually do same job as axons and dendrits. Some neuron generate and produce signals via axons and other neurons receiving signals via dendrites. In erlroute axon output is `erlroute:pub` and dendites could be linked to axons by `erlroute:sub`. With erlroute you able to implement neuron evolution as well - you can obtain full list of availiable producers and topics and randomly create new links with `erlroute:sub` and randomly destroy existing with `erlroute:unsub` during your software evolution.
+Erlroute originally was developed as a playground for genetic algorithms. Actually it does the same job as axons and dendrits. Some neuron generate and produce signals via axons and other neurons receiving signals via dendrites. In erlroute axon output is `erlroute:pub` and dendites could be linked to axons by `erlroute:sub`. With erlroute you able to implement genetic evolution as well - you can obtain full list of availiable producers which match your specific criterias and topics and randomly create new links with `erlroute:sub` and randomly destroy existing with `erlroute:unsub` during your software evolution.
 
 == Key feutures:
 
 * ets based;
 * due per module cache 'erlroute:pub' is very cheap;
 * support not only message passings, but functions and pools as destinations;
-* parse transform for build ets-names during compile time.
+* parse transform for build ets-names during compile time;
+* works both for local and distrubuted erlang modes;
+* cross-node auto-recovery of subscribtions after network splits in distributed mode;
+* auto-cleanups of subscribtions when the subscriber subscribed by pid dies.
 
 == Interface
 
-Erlroute support some useful shortcuts.
-To use shourtcuts `+{parse_transform, erlroute_transform}` must be added as compile options.
-Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlroute/blob/master/include/erlroute.hrl[erlroute.hrl^] instead of parse_transform.
+Erlroute support some useful shortcuts for prevent unnecessary terms constructions during runtime.
+To use shourtcuts `+{parse_transform, erlroute_transform}` must be added as compile options (suggested way).
+
+Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlroute/blob/master/include/erlroute.hrl[erlroute.hrl^] instead of parse_transform, for this you need to `-include("erlroute.hrl").` in file from where you planning to call that macros (if you use parse transform you don't need it).
