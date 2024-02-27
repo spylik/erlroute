@@ -14,7 +14,7 @@ Destinations could be:
 
 == Why just do not use AMQP broker for this purpose?
 
-1. AMQP brokers are really great! With AMQP you able to implement very flexible and complex solutions. But sometimes, when you just need to route messages inside your erlang application use amqp-broker is like to shoot out of cannon into sparrows. When you do not need full AMQP features, erlroute is here. 
+1. AMQP brokers are really great! With AMQP you able to implement very flexible and complex solutions. But sometimes, when you just need to route messages inside your erlang application use amqp-broker is like to shoot out of cannon into sparrows. When you do not need full AMQP features, erlroute is here.
 
 2. AMQP brokers designed for message passing and advanced message routine logic, meanwhile erlroute is a simple router
 designed for simple message passing and dynamic execution flows inside your Erlang applications.
@@ -36,7 +36,7 @@ process4 ! SomeData,
 process5 ! SomeData,
 process6 ! SomeData.
 ----
-With erlroute you can write just: 
+With erlroute you can write just:
 [source,erlang]
 ----
 % ?MODULE - test
@@ -49,7 +49,7 @@ And then, subscibers could easy to subscribe:
 erlroute:sub(<<"some_test_topic">>).
 ----
 
-You can also subscribe functions: 
+You can also subscribe functions:
 [source,erlang]
 ----
 erlroute:sub(<<"some_test_topic">>, some_module_name, send_email, ["exampl@example.com"]).
@@ -69,7 +69,8 @@ Erlroute originally was developed as a playground for genetic algorithms. Actual
 * parse transform for build ets-names during compile time;
 * works both for local and distrubuted erlang modes;
 * cross-node auto-recovery of subscribtions after network splits in distributed mode;
-* auto-cleanups of subscribtions when the subscriber subscribed by pid dies.
+* auto-cleanups of subscribtions when the subscriber subscribed by it's own pid dies.
+* todo: s̶u̶p̶p̶o̶r̶t̶ ̶R̶a̶b̶b̶i̶t̶M̶Q̶-̶s̶t̶y̶l̶e̶ ̶r̶o̶u̶t̶i̶n̶g̶_̶k̶e̶y̶s̶
 
 == Interface
 
