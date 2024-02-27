@@ -74,7 +74,7 @@
 
 -record(flow_source, {
         module                  :: 'undefined' | module(),
-        topic = <<"*">>         :: topic()
+        topic = <<"#">>         :: topic()
     }).
 
 -type flow_source()             :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].

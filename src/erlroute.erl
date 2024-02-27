@@ -41,10 +41,13 @@
         full_sync_pub/5,
         sub/2,
         sub/1,
+        unsub/2,
+        unsub/1,
         generate_per_module_cache_table_etc_name/1, % export support function for parse_transform
         post_hitcache_routine/9,
         gen_static_fun_dest/2,
-        fetch_flow_sources/0
+        fetch_flow_sources/0,
+        erlroute_cache_etses/0
     ]).
 
 % ----------------------------- gen_server part --------------------------------
@@ -224,7 +227,7 @@ code_change(_OldVsn, State, _Extra) ->
 % pub(Payload) ----> generating topic and transforming to
 % pub(?MODULE, self(), ?LINE, <<"?MODULE.?LINE">>, Payload, hybrid, '$erlroute_?MODULE')
 %
-% pub(Payload, Topic) ----> transforming to
+% pub(Topic, Payload) ----> transforming to
 % pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, '$erlroute_?MODULE')
 %
 % To use parse transform +{parse_transform, erlroute_transform} must be added as compile options.
@@ -365,13 +368,13 @@ pub(Module, Process, Line, Topic, Payload, sync = PubType, EtsName) ->
 load_routing_and_send(undefined, _EtsName, _Module, _Process, _Line, _PubType, _Topic, _Payload, Acc) -> Acc;
 load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Payload, Acc) ->
     try ets:lookup(EtsTid, Topic) of
-        [] when Topic =/= <<"*">> ->
-            load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, <<"*">>, Payload, Acc);
+        [] when Topic =/= <<"#">> ->
+            load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, <<"#">>, Payload, Acc);
         [] ->
             Acc;
-        Routes when Topic =/= <<"*">> ->
+        Routes when Topic =/= <<"#">> ->
             % send to wildcard-topic subscribers
-            load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, <<"*">>, Payload, send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc));
+            load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, <<"#">>, Payload, send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc));
         Routes ->
             send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc)
     catch
@@ -489,10 +492,10 @@ send([], _Payload, _Module, _Process, _Line, _PubType, _Topic, _EtsName, Acc) ->
 % For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
 
 -spec sub(Target) -> ok when
-    Target  :: flow_source() | nonempty_list() | topic() | module().
+    Target  :: flow_source() | [{topic, topic()} | {module, module()}] | topic() | module().
 
 % @doc subscribe current process to all messages from module Module
-sub(Module) when is_atom(Module) -> sub(#flow_source{module = Module, topic = <<"*">>}, {process, self(), info});
+sub(Module) when is_atom(Module) -> sub(#flow_source{module = Module, topic = <<"#">>}, {process, self(), info});
 
 % @doc subscribe current process to messages with topic Topic from any module
 sub(Topic) when is_binary(Topic) -> sub(#flow_source{module = undefined, topic = Topic}, {process, self(), info});
@@ -502,7 +505,7 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 
 % @doc full subscribtion api
 -spec sub(FlowSource, FlowDest) -> ok when
-    FlowSource  :: flow_source() | nonempty_list() | topic() | module(),
+    FlowSource  :: flow_source() | [{topic, topic()} | {module, module()}] | topic() | module(),
     FlowDest    :: flow_dest()
                  | pid()
                  | atom()
@@ -512,7 +515,7 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
-        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function'  ->
+        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' orelse DestType =:= 'erlroute_on_other_node' ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
 % when Dest is pid() or atom
@@ -551,7 +554,7 @@ sub(FlowSource, FlowDest) when is_list(FlowSource) ->
                 {module, Data} -> Data
             end,
             topic = case lists:keyfind(topic, 1, FlowSource) of
-                false -> <<"*">>;
+                false -> <<"#">>;
                 {topic, Data} -> Data
             end
         }, FlowDest).
@@ -615,7 +618,75 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
 % ================================ end of sub part =============================
 % ----------------------------------- unsub part -------------------------------
 
-% todo
+-spec unsub(Target) -> ok when
+    Target  :: flow_source() | [{topic, topic()} | {module, module()}] | topic() | module().
+
+% @doc unsibscribe subscribe current process from all messages from module Module
+unsub(Module) when is_atom(Module) -> unsub(#flow_source{module = Module, topic = <<"#">>}, {process, self(), info});
+
+% @doc unsubscribe current process from messages with topic Topic from any module
+unsub(Topic) when is_binary(Topic) -> unsub(#flow_source{module = undefined, topic = Topic}, {process, self(), info});
+
+% @doc subscribe current process to messages with full-defined FlowSource ([{module, Module}, {topic, Topic}])
+unsub(FlowSource) when is_list(FlowSource) -> unsub(FlowSource, {process, self(), info}).
+
+% @doc full subscribtion api
+-spec unsub(FlowSource, FlowDest) -> ok when
+    FlowSource  :: flow_source() | [{topic, topic()} | {module, module()}] | topic() | module(),
+    FlowDest    :: flow_dest()
+                 | pid()
+                 | atom()
+                 | fun() | {node() | fun()}
+                 | static_function() | {node(), static_function()}.
+
+unsub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
+        is_atom(Module),
+        is_binary(Topic),
+        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' orelse DestType =:= 'erlroute_on_other_node' ->
+    gen_server:call(?MODULE, {unsubscribe, FlowSource, {DestType, Dest, Method}});
+
+% when Dest is pid() or atom
+unsub(FlowSource, FlowDest) when is_pid(FlowDest) orelse is_atom(FlowDest) ->
+    unsub(FlowSource, {process, FlowDest, info});
+
+% when Dest is higher order functions (by default this will be executed on subscriber node (as a most common case), not producer)
+unsub(FlowSource, FlowDest) when is_function(FlowDest, 1) orelse is_function(FlowDest, 2) ->
+    unsub(FlowSource, {function, {FlowDest, is_function(FlowDest, 2)}, cast});
+
+% when Dest is higher order functions which have to be executed on specific node
+unsub(FlowSource, {Node, Function}) when is_atom(Node) andalso (is_function(Function, 1) orelse is_function(Function, 2)) ->
+    unsub(FlowSource, {function, {Function, is_function(Function, 2)}, {Node, cast}});
+
+% when Dest is a Module:Function([Msg | ExtraArguments])
+unsub(FlowSource, {Module, Function, Arguments} = MFA) when is_atom(Module) andalso is_atom(Function) andalso is_list(Arguments) ->
+    unsub(FlowSource, {function, gen_static_fun_dest('$local', MFA), cast});
+
+% when Dest is mfa which have to be executed on specific node
+unsub(FlowSource, {Node, {Module, Function, Arguments} = MFA}) when is_atom(Node) andalso is_atom(Module) andalso is_atom(Function) andalso is_list(Arguments) ->
+    unsub(FlowSource, {function, gen_static_fun_dest(Node, MFA), {Node, cast}});
+
+% when FlowSource is_atom()
+unsub(FlowSource, FlowDest) when is_atom(FlowSource) ->
+    sub(#flow_source{module = FlowSource}, FlowDest);
+
+% when FlowSource is_binary()
+unsub(FlowSource, FlowDest) when is_binary(FlowSource) ->
+    unsub(#flow_source{topic = FlowSource}, FlowDest);
+
+% when FlowSource is_list
+unsub(FlowSource, FlowDest) when is_list(FlowSource) ->
+    unsub(#flow_source{
+            module = case lists:keyfind(module, 1, FlowSource) of
+                false -> undefined;
+                {module, Data} -> Data
+            end,
+            topic = case lists:keyfind(topic, 1, FlowSource) of
+                false -> <<"#">>;
+                {topic, Data} -> Data
+            end
+        }, FlowDest).
+
+% this function usually call from gen_server
 -spec unsubscribe(FlowSource, FlowDest, ErlRouteNodes) -> Result when
     FlowSource      :: flow_source() | all,
     FlowDest        :: {process, proc()}| {function, fun_dest()} | flow_dest(),
@@ -631,14 +702,12 @@ unsubscribe(all, {DestType, Dest}, ErlRouteNodes) ->
             ['$_']
         }]
     ),
-    error_logger:warning_msg("Subscriber topics is ~p\n",[TopicsAndModules]),
-
     ets:match_delete(?SUBETS, #subscriber{dest_type = DestType, dest = Dest, _ = '_'}),
     lists:foreach(fun(CacheEtsName) ->
         ets:match_delete(CacheEtsName, #cached_route{dest_type = DestType, dest = Dest, _ = '_'})
     end, erlroute_cache_etses()),
 
-    % cleanup on other nodes
+    % cleanup on other nodes if we don't have other subscribers with the same combination of Topic / Module
     lists:foreach(fun(#subscriber{topic = Topic, module = Module}) ->
         case ets:match(?SUBETS, #subscriber{topic = Topic, module = Module, _ = '_'}) of
             [] ->
@@ -649,11 +718,41 @@ unsubscribe(all, {DestType, Dest}, ErlRouteNodes) ->
                     [#flow_source{topic = Topic, module = Module}, {erlroute_on_other_node, node(), pub_type_based}]
                 );
             _HaveRecord ->
-                error_logger:warning_msg("have other records\n",[]),
                 false
         end
     end, TopicsAndModules);
 
+unsubscribe(#flow_source{module = Module, topic = Topic} = FLowSource, {DestType, Dest} = DestFull, ErlRouteNodes) ->
+    ets:match_delete(?SUBETS, #subscriber{dest_type = DestType, dest = Dest, module = Module, topic = Topic, _ = '_'}),
+
+    CacheEtsSes = case Module of
+        undefined ->
+            erlroute_cache_etses();
+        _SomeModule ->
+            [generate_per_module_cache_table_etc_name(Module)]
+    end,
+
+    lists:foreach(fun(CacheEtsName) ->
+        ets:match_delete(CacheEtsName, #cached_route{dest_type = DestType, topic = Topic, dest = Dest, _ = '_'})
+    end, CacheEtsSes),
+
+    % cleanup on other nodes if we don't have other subscribers with the same combination of Topic / Module
+    case DestType =/= erlroute_on_other_node of
+        true ->
+            case ets:match(?SUBETS, #subscriber{topic = Topic, module = Module, _ = '_'}) of
+                [] ->
+                    erpc:multicast(
+                        ErlRouteNodes,
+                        ?MODULE,
+                        unsub,
+                        [#flow_source{topic = Topic, module = Module}, {erlroute_on_other_node, node(), pub_type_based}]
+                    );
+                _HaveRecord ->
+                    false
+            end;
+        false ->
+            false
+    end;
 
 unsubscribe(FlowSource, {DestType, Dest, _DeliveryMethod}, ErlRouteNodes) -> unsubscribe(FlowSource, {DestType, Dest}, ErlRouteNodes).
 
@@ -675,21 +774,27 @@ unsubscribe(FlowSource, {DestType, Dest, _DeliveryMethod}, ErlRouteNodes) -> uns
 
 post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetAlready, PostRef) ->
     Words = split_topic(Topic),
-    ProcessToWrite = case is_pid(Process) of
-        true ->
-            case process_info(Process, [registered_name]) of
-                [{registered_name, SomeName}] when is_atom(SomeName) ->
-                    SomeName;
-                [{registered_name, []}] ->
-                    '$erlroute_unregistered';
-                undefined ->
-                    '$erlroute_unregistered_and_dead';
-                [] ->
-                    '$erlroute_unregistered'
-            end;
-        false ->
-            Process
-    end,
+    ProcessToWrite =
+        try
+            case is_pid(Process) of
+                true ->
+                    case process_info(Process, [registered_name]) of
+                        [{registered_name, SomeName}] when is_atom(SomeName) ->
+                            SomeName;
+                        [{registered_name, []}] ->
+                            '$erlroute_unregistered';
+                        undefined ->
+                            '$erlroute_unregistered_and_dead';
+                        [] ->
+                            '$erlroute_unregistered'
+                    end;
+                false ->
+                    Process
+            end
+        catch
+            _:_ ->
+                Process
+        end,
     _ = ets:insert('$erlroute_topics', #topics{
         topic = Topic,
         words = Words,
