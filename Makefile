@@ -19,9 +19,7 @@ endif
 # our includes (must rid after refactoring, esp. erlpusher, erlroute)
 OUR_INCS += $(DEPS_DIR)/teaser/include
 
-TEST_ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +debug_info
-
-#ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +warn_missing_spec -Werror
+ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +warn_export_all +warn_unused_import +warn_untyped_record +warn_missing_spec_all -Werror +debug_info
 
 dep_teaser = git https://github.com/spylik/teaser develop
 
@@ -49,6 +47,8 @@ export ERL_COMPILER_OPTIONS
 
 SHELL_DEPS = sync lager
 
-SHELL_OPTS = -kernel shell_history enabled -pa ebin/ test/ -I -eval 'mlibs:discover()' -env ERL_LIBS deps -run mlibs autotest_on_compile
+SHELL_OPTS = -kernel shell_history enabled -pa ebin/ test/ -I -eval 'tutils:discover()' -env ERL_LIBS deps -run tutils autotest_on_compile
 
 include erlang.mk
+
+app:: rebar.config

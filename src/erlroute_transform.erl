@@ -26,6 +26,7 @@ parse_transform(Forms, _Options) ->
     parse_trans:plain_transform(fun do_transform/1, Forms).
 
 % @doc transform erlroute:pub/1
+-spec do_transform(erl_parse:abstract_form()) -> erl_parse:abstract_form() | continue.
 do_transform(
     {call, _,
         {remote, _,
@@ -37,7 +38,7 @@ do_transform(
     }) ->
     RealLine = realline(Line),
     Module = get(module),
-    EtsName = erlroute:generate_complete_routing_name(Module),
+    EtsName = erlroute:generate_per_module_cache_table_etc_name(Module),
     Topic = lists:concat([Module,".",RealLine]),
     Output = {call,RealLine,
         {remote,RealLine,
@@ -69,7 +70,7 @@ do_transform(
 ) ->
     RealLine = realline(Line),
     Module = get(module),
-    EtsName = erlroute:generate_complete_routing_name(Module),
+    EtsName = erlroute:generate_per_module_cache_table_etc_name(Module),
     {call,Line,
         {remote,RealLine,
             {atom,RealLine,erlroute},{atom,RealLine,pub}

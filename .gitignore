@@ -19,5 +19,6 @@ erlroute.d
 *.plt
 cover/*
 eunit.coverdata
+recompile.log
 ct.cover.spec
 .erlang.mk/
