@@ -43,7 +43,7 @@
         sub/1,
         unsub/2,
         unsub/1,
-        generate_per_module_cache_table_etc_name/1, % export support function for parse_transform
+        cache_table/1, % export support function for parse_transform
         post_hitcache_routine/9,
         gen_static_fun_dest/2,
         fetch_flow_sources/0,
@@ -248,7 +248,7 @@ pub(Payload) ->
     Line = ?LINE,
     Topic = list_to_binary(lists:concat([Module,",",Line])),
     error_logger:warning_msg("Attempt to use pub/1 without parse_transform. ?MODULE, ?LINE and Topic will be wrong."),
-    pub(Module, self(), Line, Topic, Payload, 'hybrid', generate_per_module_cache_table_etc_name(Module)).
+    pub(Module, self(), Line, Topic, Payload, 'hybrid', cache_table(Module)).
 
 % shortcut (should use parse transform better than pub/2)
 -spec pub(Topic, Payload) -> Result when
@@ -260,7 +260,7 @@ pub(Topic, Payload) ->
     Module = ?MODULE,
     Line = ?LINE,
     error_logger:warning_msg("Attempt to use pub/2 without parse_transform. ?MODULE and ?LINE will be wrong."),
-    pub(Module, self(), Line, Topic, Payload, 'hybrid', generate_per_module_cache_table_etc_name(Module)).
+    pub(Module, self(), Line, Topic, Payload, 'hybrid', cache_table(Module)).
 
 % hybrid
 -spec pub(Module, Process, Line, Topic, Payload) -> Result when
@@ -273,7 +273,7 @@ pub(Topic, Payload) ->
 
 pub(Module, Process, Line, Topic, Payload) ->
     error_logger:warning_msg("Attempt to use pub/5 without parse_transform."),
-    pub(Module, Process, Line, Topic, Payload, 'hybrid', generate_per_module_cache_table_etc_name(Module)).
+    pub(Module, Process, Line, Topic, Payload, 'hybrid', cache_table(Module)).
 
 % full_async
 -spec full_async_pub(Module, Process, Line, Topic, Payload) -> Result when
@@ -285,7 +285,7 @@ pub(Module, Process, Line, Topic, Payload) ->
     Result  ::  []. % in async we always return [] cuz we don't know yet subscribers
 
 full_async_pub(Module, Process, Line, Topic, Payload) ->
-    pub(Module, Process, Line, Topic, Payload, async, generate_per_module_cache_table_etc_name(Module)).
+    pub(Module, Process, Line, Topic, Payload, async, cache_table(Module)).
 
 % full_sync
 -spec full_sync_pub(Module, Process, Line, Topic, Payload) -> Result when
@@ -297,7 +297,7 @@ full_async_pub(Module, Process, Line, Topic, Payload) ->
     Result  ::  pub_result().
 
 full_sync_pub(Module, Process, Line, Topic, Payload) ->
-    pub(Module, Process, Line, Topic, Payload, sync, generate_per_module_cache_table_etc_name(Module)).
+    pub(Module, Process, Line, Topic, Payload, sync, cache_table(Module)).
 
 % @doc full parameter pub
 -spec pub(Module, Process, Line, Topic, Payload, PubType, EtsName) -> Result when
@@ -591,7 +591,7 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
                         undefined ->
                             lists:map(fun
                                 (#topics{module = TopicModule}) when TopicModule =:= Module orelse Module =:= undefined ->
-                                    ets:insert(route_table_must_present(generate_per_module_cache_table_etc_name(Module)),
+                                    ets:insert(route_table_must_present(cache_table(Module)),
                                         #cached_route{
                                             topic = Topic,
                                             dest_type = DestType,
@@ -605,7 +605,7 @@ subscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}
                             end, ets:lookup('$erlroute_topics',Topic));
                         _NotUndefined ->
                             ets:insert(
-                                route_table_must_present(generate_per_module_cache_table_etc_name(Module)),
+                                route_table_must_present(cache_table(Module)),
                                 #cached_route{topic = Topic, dest_type = DestType, dest = Dest, method = Method}
                             )
                     end;
@@ -667,7 +667,7 @@ unsub(FlowSource, {Node, {Module, Function, Arguments} = MFA}) when is_atom(Node
 
 % when FlowSource is_atom()
 unsub(FlowSource, FlowDest) when is_atom(FlowSource) ->
-    sub(#flow_source{module = FlowSource}, FlowDest);
+    unsub(#flow_source{module = FlowSource}, FlowDest);
 
 % when FlowSource is_binary()
 unsub(FlowSource, FlowDest) when is_binary(FlowSource) ->
@@ -722,18 +722,25 @@ unsubscribe(all, {DestType, Dest}, ErlRouteNodes) ->
         end
     end, TopicsAndModules);
 
-unsubscribe(#flow_source{module = Module, topic = Topic} = FLowSource, {DestType, Dest} = DestFull, ErlRouteNodes) ->
-    ets:match_delete(?SUBETS, #subscriber{dest_type = DestType, dest = Dest, module = Module, topic = Topic, _ = '_'}),
+unsubscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, DeliveryMethod}, ErlRouteNodes) ->
+    ets:match_delete(?SUBETS, #subscriber{dest_type = DestType, dest = Dest, module = Module, method = DeliveryMethod, topic = Topic, _ = '_'}),
 
     CacheEtsSes = case Module of
         undefined ->
             erlroute_cache_etses();
         _SomeModule ->
-            [generate_per_module_cache_table_etc_name(Module)]
+            [cache_table(Module)]
     end,
 
+    %error_logger:warning_msg("desttype is ~p, dest is ~p, module is ~p, topic is ~p, tables is ~p",[DestType, Dest, Module, Topic, CacheEtsSes]),
     lists:foreach(fun(CacheEtsName) ->
-        ets:match_delete(CacheEtsName, #cached_route{dest_type = DestType, topic = Topic, dest = Dest, _ = '_'})
+        % cache table probably not exist yet, so wrapping in a try/catch
+        try
+            ets:match_delete(CacheEtsName, #cached_route{dest_type = DestType, topic = Topic, method = DeliveryMethod, dest = Dest, _ = '_'})
+        catch
+            _:_ ->
+                ok
+        end
     end, CacheEtsSes),
 
     % cleanup on other nodes if we don't have other subscribers with the same combination of Topic / Module
@@ -824,11 +831,11 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
 
 
 % @doc generate ets name for Module for completed topics
--spec generate_per_module_cache_table_etc_name(Module) -> EtsName when
+-spec cache_table(Module) -> EtsName when
     Module  ::  module(),
     EtsName ::  atom().
 
-generate_per_module_cache_table_etc_name(Module) when is_atom(Module)->
+cache_table(Module) when is_atom(Module)->
     list_to_atom("$erlroute_cache_" ++ atom_to_list(Module)).
 
 % @doc Check if ets routing table is present, on falure - let's create it
