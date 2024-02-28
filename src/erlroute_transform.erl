@@ -38,7 +38,7 @@ do_transform(
     }) ->
     RealLine = realline(Line),
     Module = get(module),
-    EtsName = erlroute:generate_per_module_cache_table_etc_name(Module),
+    EtsName = erlroute:cache_table(Module),
     Topic = lists:concat([Module,".",RealLine]),
     Output = {call,RealLine,
         {remote,RealLine,
@@ -70,7 +70,7 @@ do_transform(
 ) ->
     RealLine = realline(Line),
     Module = get(module),
-    EtsName = erlroute:generate_per_module_cache_table_etc_name(Module),
+    EtsName = erlroute:cache_table(Module),
     {call,Line,
         {remote,RealLine,
             {atom,RealLine,erlroute},{atom,RealLine,pub}
