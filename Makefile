@@ -50,5 +50,3 @@ SHELL_DEPS = sync lager
 SHELL_OPTS = -kernel shell_history enabled -pa ebin/ test/ -I -eval 'tutils:discover()' -env ERL_LIBS deps -run tutils autotest_on_compile
 
 include erlang.mk
-
-app:: rebar.config
