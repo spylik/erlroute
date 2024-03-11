@@ -17,7 +17,6 @@
 -define(SERVER, ?MODULE).
 
 -include("erlroute.hrl").
--include_lib("kernel/include/logger.hrl").
 
 -behaviour(gen_server).
 
@@ -732,7 +731,6 @@ unsubscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Deliv
             [cache_table(Module)]
     end,
 
-    %error_logger:warning_msg("desttype is ~p, dest is ~p, module is ~p, topic is ~p, tables is ~p",[DestType, Dest, Module, Topic, CacheEtsSes]),
     lists:foreach(fun(CacheEtsName) ->
         % cache table probably not exist yet, so wrapping in a try/catch
         try

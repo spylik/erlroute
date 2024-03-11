@@ -4,13 +4,13 @@ Erlroute is the simple router designed for http://www.jpaulmorrison.com/fbp/inde
 
 The main idea is to use `erlroute:pub` everywhere, where you may require the data now or in the future.
 
-Actually, erlroute do simple job - it just route messages or execution flows. Simply write erlroute:pub in places which
+Actually, erlroute do simple job - it just route messages or execution flows. Simply write `erlroute:pub` in places which
 will require dinamic route and "destination" you can define later.
 
 Destinations could be:
-- other local or remote processes;
-- functions (local and on remote nodes);
-- pool workers
+* other local or remote processes;
+* functions (local and on remote nodes);
+* pool workers.
 
 == Why just do not use AMQP broker for this purpose?
 
@@ -39,7 +39,6 @@ process6 ! SomeData.
 With erlroute you can write just:
 [source,erlang]
 ----
-% ?MODULE - test
 erlroute:pub(<<"some_test_topic">>, {time, erlang:system_time()}).
 ----
 And then, subscibers could easy to subscribe:
