@@ -473,8 +473,12 @@ send([#cached_route{dest_type = 'poolboy', method = Method, dest = PoolName}|T],
     end,
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{PoolName, Method} | Acc]);
 
-send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
+send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_pid(Proc) ->
 	erlang:send(Proc, Payload),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
+
+send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_atom(Proc) ->
+	erlang:send({Proc, Node}, Payload),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
 
 % sending to erlroute on other nodes
