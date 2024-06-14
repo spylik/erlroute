@@ -13,7 +13,7 @@
 
 -define(SUBETS, '$erlroute_subscribers').
 
--define(DEFAULT_TIMEOUT_FOR_RPC, 10000).
+-define(DEFAULT_TIMEOUT_FOR_RPC, 1000).
 -define(SERVER, ?MODULE).
 
 -include("erlroute.hrl").
@@ -45,7 +45,7 @@
         cache_table/1, % export support function for parse_transform
         post_hitcache_routine/9,
         gen_static_fun_dest/2,
-        fetch_flow_sources/0,
+        fetch_flow_dests_and_sources/0,
         erlroute_cache_etses/0
     ]).
 
@@ -53,7 +53,7 @@
 
 % @doc start api
 -spec start_link() -> Result when
-    Result      :: {ok,Pid} | ignore | {error,Error},
+    Result      :: {ok, Pid} | ignore | {error, Error},
     Pid         :: pid(),
     Error       :: {already_started,Pid} | term().
 
@@ -113,7 +113,7 @@ init([]) ->
 handle_call({subscribe, FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlrouteNodes, monitors = Monitors} = State) ->
     ProbablyMoreMonitors = may_establish_monitor(FlowDest, Monitors),
     Result = subscribe(FlowSource, FlowDest),
-    _ = erpc:multicall(ErlrouteNodes, erlang, send, [erlroute, {subscribe_from_remote, FlowSource, node()}], ?DEFAULT_TIMEOUT_FOR_RPC),
+    _ = erpc:multicall(ErlrouteNodes, erlang, send, [erlroute, {subscribe_from_remote, FlowSource, FlowDest, node()}], ?DEFAULT_TIMEOUT_FOR_RPC),
     {reply, Result, State#erlroute_state{monitors = ProbablyMoreMonitors}};
 
 handle_call({unsubscribe, FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlRouteNodes} = State) ->
@@ -151,7 +151,7 @@ handle_cast(Msg, State) ->
 
 % @doc callbacks for gen_server handle_info.
 -spec handle_info(Message, State) -> Result when
-    Message     :: {nodeup, node()} | {nodedown, node()} | {subscribe_from_remote, flow_source(), node()},
+    Message     :: {nodeup, node()} | {nodedown, node()} | {subscribe_from_remote, flow_source(), flow_dest(), node()},
     State       :: erlroute_state(),
     Result      :: {noreply, erlroute_state()}.
 
@@ -178,7 +178,11 @@ handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) -
     _ = unsubscribe_node(Node),
     {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}};
 
-handle_info({subscribe_from_remote, FlowSource, Node}, State) ->
+handle_info({subscribe_from_remote, FlowSource, {process, Proc, info}, Node}, State) ->
+    _ = subscribe(FlowSource, {process_on_other_node, {Node, Proc}, info}),
+    {noreply, State};
+
+handle_info({subscribe_from_remote, FlowSource, _FlowDest, Node}, State) ->
     _ = subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based}),
     {noreply, State};
 
@@ -469,13 +473,22 @@ send([#cached_route{dest_type = 'poolboy', method = Method, dest = PoolName}|T],
     end,
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{PoolName, Method} | Acc]);
 
+send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
+	erlang:send(Proc, Payload),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
+
 % sending to erlroute on other nodes
 send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = Node}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
     case PubType of
         async ->
             erpc:cast(Node, erlroute, pub, [Module, Process, Line, Topic, Payload, sync, EtsName]);
         _ ->
-            erpc:call(Node, erlroute, pub, [Module, Process, Line, Topic, Payload, sync, EtsName], ?DEFAULT_TIMEOUT_FOR_RPC)
+            try
+                erpc:call(Node, erlroute, pub, [Module, Process, Line, Topic, Payload, sync, EtsName], ?DEFAULT_TIMEOUT_FOR_RPC)
+            catch
+                _Error:Reason ->
+                    error_logger:error_msg("erlroute erpc:call to node ~p when apply ~p:~p(~p) failed with reason ~p\n",[Node, ?MODULE, pub, [Module, Process, Line, Topic, Payload, sync, EtsName], Reason])
+            end
     end,
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Node, Method} | Acc]);
 
@@ -514,7 +527,7 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
-        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' orelse DestType =:= 'erlroute_on_other_node' ->
+        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' orelse DestType =:= 'erlroute_on_other_node' orelse DestType =:= 'process_on_other_node' ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
 % when Dest is pid() or atom
@@ -710,12 +723,17 @@ unsubscribe(all, {DestType, Dest}, ErlRouteNodes) ->
     lists:foreach(fun(#subscriber{topic = Topic, module = Module}) ->
         case ets:match(?SUBETS, #subscriber{topic = Topic, module = Module, _ = '_'}) of
             [] ->
-                erpc:multicast(
-                    ErlRouteNodes,
-                    ?MODULE,
-                    unsub,
-                    [#flow_source{topic = Topic, module = Module}, {erlroute_on_other_node, node(), pub_type_based}]
-                );
+                try
+                    erpc:multicast(
+                        ErlRouteNodes,
+                        ?MODULE,
+                        unsub,
+                        [#flow_source{topic = Topic, module = Module}, {erlroute_on_other_node, node(), pub_type_based}]
+                    )
+                catch
+                    _Error:Reason ->
+                        error_logger:error_msg("erlroute erpc:multicast to nodes ~p when apply ~p:~p(~p) failed with reason ~p\n",[ErlRouteNodes, ?MODULE, unsub, [#flow_source{topic = Topic, module = Module}, {erlroute_on_other_node, node(), pub_type_based}], Reason])
+                end;
             _HaveRecord ->
                 false
         end
@@ -924,7 +942,7 @@ gen_static_fun_dest(Node, MFA) ->
         gen_static_fun_dest('$local', MFA)
     catch
         _:_ ->
-            erpc:call(Node, ?MODULE, gen_static_fun_dest, ['$local', MFA], 1000)
+            erpc:call(Node, ?MODULE, gen_static_fun_dest, ['$local', MFA], ?DEFAULT_TIMEOUT_FOR_RPC)
     end.
 
 % @doc Discrover erlang nodes which have erlroute
@@ -975,8 +993,10 @@ fetch_subscribtions_from_remote_nodes(Nodes) ->
             false;
         ({Node, {ok, FlowSources}}) when is_list(FlowSources) ->
             lists:map(fun
-                (FlowSource) ->
-                    subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based})
+                (#flow_source{} = FlowSource) ->
+                    subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based});
+                ({Proc, #flow_source{} = FlowSource}) ->
+                    subscribe(FlowSource, {process_on_other_node, {Node, Proc}, info})
                 end,
             FlowSources);
         ({_Node, _OtherResp}) ->
@@ -987,7 +1007,7 @@ fetch_subscribtions_from_remote_nodes(Nodes) ->
             erpc:multicall(
               Nodes,
               erlroute,
-              fetch_flow_sources,
+              fetch_flow_dests_and_sources,
               [],
               ?DEFAULT_TIMEOUT_FOR_RPC
             )
@@ -1000,8 +1020,10 @@ fetch_subscribtions_from_remote_nodes(Nodes) ->
 
 unsubscribe_node(Node) ->
     ets:match_delete(?SUBETS, #subscriber{dest_type = erlroute_on_other_node, dest = Node, _ = '_'}),
+    ets:match_delete(?SUBETS, #subscriber{dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'}),
     lists:foreach(fun(CacheEtsName) ->
-        ets:match_delete(CacheEtsName, #cached_route{dest_type = erlroute_on_other_node, dest = Node, _ = '_'})
+        ets:match_delete(CacheEtsName, #cached_route{dest_type = erlroute_on_other_node, dest = Node, _ = '_'}),
+        ets:match_delete(CacheEtsName, #cached_route{dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'})
     end, erlroute_cache_etses()).
 
 -spec erlroute_cache_etses() -> Result when
@@ -1027,13 +1049,17 @@ erlroute_cache_etses() ->
         ets:all()
     ).
 
--spec fetch_flow_sources() -> Result when
-    Result      :: [flow_source()].
+-spec fetch_flow_dests_and_sources() -> Result when
+    Result      :: [{proc(), flow_source()} | flow_source()].
 
-fetch_flow_sources() ->
+fetch_flow_dests_and_sources() ->
     lists:foldl(fun
         (#subscriber{dest_type = erlroute_on_other_node}, Acc) ->
             Acc;
+        (#subscriber{dest_type = process_on_other_node}, Acc) ->
+            Acc;
+        (#subscriber{dest_type = process, method = info, dest = Proc, topic = Topic, module = Module}, Acc) ->
+            [{Proc, #flow_source{module = Module, topic = Topic}} | Acc];
         (#subscriber{topic = Topic, module = Module}, Acc) ->
             [#flow_source{module = Module, topic = Topic} | Acc]
         end,

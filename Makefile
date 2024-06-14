@@ -47,6 +47,6 @@ export ERL_COMPILER_OPTIONS
 
 SHELL_DEPS = sync lager
 
-SHELL_OPTS = -kernel shell_history enabled -pa ebin/ test/ -I -eval 'tutils:discover()' -env ERL_LIBS deps -run tutils autotest_on_compile
+SHELL_OPTS = -mode interactive -kernel shell_history enabled -pa ebin/ test/ -I -env ERL_LIBS deps -env LOGGER_CHARS_LIMIT unlimited -env LOGGER_DEPTH unlimited -eval 'sync:start(), sync:onsync(fun(Mods) -> [eunit:test(Mod) || Mod <- Mods] end), [lists:map(fun(Module) -> code:ensure_loaded(list_to_atom(lists:takewhile(fun(X) -> X /= 46 end, lists:subtract(Module,Dir)))) end, filelib:wildcard(Dir++"*.erl")) || Dir <- ["src/","test/"], ok =:= filelib:ensure_dir(Dir)]'
 
 include erlang.mk
