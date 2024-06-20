@@ -408,53 +408,61 @@ send([#cached_route{dest_type = 'process', method = Method, dest = Dest}|T], Pay
 
 % apply process
 send([#cached_route{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
-    case Method of
-        cast ->
-            case {is_function(Function), ShellIncludeTopic} of
-                {true, true} ->
-                    spawn(fun() -> erlang:apply(Function, [Topic, Payload]) end);
-                {true, false} ->
-                    spawn(fun() -> erlang:apply(Function, [Payload]) end);
-                {false, true} ->
-                    {M, F, A} = Function,
-                    spawn(M, F, [Topic, Payload | A]);
-                {false, false} ->
-                    {M, F, A} = Function,
-                    spawn(M, F, [Payload | A])
-            end;
-        call ->
-            case {is_function(Function), ShellIncludeTopic} of
-                {true, true} ->
-                    erlang:apply(Function, [Topic, Payload]);
-                {true, false} ->
-                    erlang:apply(Function, [Payload]);
-                {false, true} ->
-                    {M, F, A} = Function,
-                    apply(M, F, [Topic, Payload | A]);
-                {false, false} ->
-                    {M, F, A} = Function,
-                    apply(M, F, [Payload | A])
-            end;
-        {Node, cast} when is_atom(Node) ->
-            case ShellIncludeTopic of
-                true ->
-                    erpc:cast(Node, fun() -> erlang:apply(Function, [Topic, Payload]) end);
-                false ->
-                    erpc:cast(Node, fun() -> erlang:apply(Function, [Payload]) end)
-            end;
-        {Node, call} when is_atom(Node) ->
-            case {is_function(Function), ShellIncludeTopic} of
-                {true, true} ->
-                    erpc:call(Node, fun() -> erlang:apply(Function, [Topic, Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
-                {true, false} ->
-                    erpc:call(Node, fun() -> erlang:apply(Function, [Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
-                {false, true} ->
-                    {M, F, A} = Function,
-                    erpc:call(Node, M, F, [Topic, Payload | A], ?DEFAULT_TIMEOUT_FOR_RPC);
-                {false, false} ->
-                    {M, F, A} = Function,
-                    erpc:call(Node, M, F, [Topic, Payload | A], ?DEFAULT_TIMEOUT_FOR_RPC)
-            end
+    try
+        case Method of
+            cast ->
+                case {is_function(Function), ShellIncludeTopic} of
+                    {true, true} ->
+                        spawn(fun() -> erlang:apply(Function, [Topic, Payload]) end);
+                    {true, false} ->
+                        spawn(fun() -> erlang:apply(Function, [Payload]) end);
+                    {false, true} ->
+                        {M, F, A} = Function,
+                        spawn(M, F, [Topic, Payload | A]);
+                    {false, false} ->
+                        {M, F, A} = Function,
+                        spawn(M, F, [Payload | A])
+                end;
+            call ->
+                case {is_function(Function), ShellIncludeTopic} of
+                    {true, true} ->
+                        erlang:apply(Function, [Topic, Payload]);
+                    {true, false} ->
+                        erlang:apply(Function, [Payload]);
+                    {false, true} ->
+                        {M, F, A} = Function,
+                        apply(M, F, [Topic, Payload | A]);
+                    {false, false} ->
+                        {M, F, A} = Function,
+                        apply(M, F, [Payload | A])
+                end;
+            {Node, cast} when is_atom(Node) ->
+                case ShellIncludeTopic of
+                    true ->
+                        erpc:cast(Node, fun() -> erlang:apply(Function, [Topic, Payload]) end);
+                    false ->
+                        erpc:cast(Node, fun() -> erlang:apply(Function, [Payload]) end)
+                end;
+            {Node, call} when is_atom(Node) ->
+                case {is_function(Function), ShellIncludeTopic} of
+                    {true, true} ->
+                        erpc:call(Node, fun() -> erlang:apply(Function, [Topic, Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
+                    {true, false} ->
+                        erpc:call(Node, fun() -> erlang:apply(Function, [Payload]) end, ?DEFAULT_TIMEOUT_FOR_RPC);
+                    {false, true} ->
+                        {M, F, A} = Function,
+                        erpc:call(Node, M, F, [Topic, Payload | A], ?DEFAULT_TIMEOUT_FOR_RPC);
+                    {false, false} ->
+                        {M, F, A} = Function,
+                        erpc:call(Node, M, F, [Topic, Payload | A], ?DEFAULT_TIMEOUT_FOR_RPC)
+                end
+        end
+    catch
+        Error:Reason ->
+            error_logger:error_msg(
+                "failed to dispatch message ~p via function ~p for topic ~p. Failed with reason: ~p:~p.",
+                [Payload, Function, Topic, Error, Reason]
+            )
     end,
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
 
