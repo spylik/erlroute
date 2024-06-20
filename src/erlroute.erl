@@ -402,7 +402,17 @@ send([#cached_route{dest_type = 'process', method = Method, dest = Dest}|T], Pay
     case Method of
         info -> Dest ! Payload;
         cast -> gen_server:cast(Dest, Payload);
-        call -> gen_server:call(Dest, Payload)
+        call ->
+            try
+                gen_server:call(Dest, Payload)
+            catch
+                Error:Reason ->
+		            error_logger:error_msg(
+		                "failed to dispatch message ~p via gen_server:call to ~p for topic ~p. Failed with reason: ~p:~p.",
+		                [Payload, Dest, Topic, Error, Reason]
+		            )
+			end
+
     end,
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
 
