@@ -20,7 +20,7 @@
 -type pub_type()                :: 'sync' | 'async' | 'hybrid'.
 -type topic()                   :: binary().
 -type proc()                    :: pid() | atom().
--type other_node_dest()         :: node().
+-type other_node_dest()         :: node() | {node(), proc()}.
 -type payload()                 :: term().
 
 
@@ -37,7 +37,7 @@
 -type shall_include_topic()     :: boolean().
 -type fun_dest()                :: {fun() | static_function(), shall_include_topic()}.
 
--type dest_type()               :: 'process' | 'poolboy' | 'function' | 'erlroute_on_other_node'.
+-type dest_type()               :: 'process' | 'poolboy' | 'function' | 'erlroute_on_other_node' | 'process_on_other_node'.
 -type dest()                    :: proc() | fun_dest() | other_node_dest().
 
 % only for cache for final topics (generated with module name)
@@ -81,6 +81,7 @@
 -type flow_dest()               :: {process, proc(), proc_delivery_method()}
                                 |  {poolboy, atom(), proc_delivery_method()}
                                 |  {function, fun_dest(), function_delivery_method()}
-                                |  {erlroute_on_other_node, node(), pub_type_based}.
+                                |  {erlroute_on_other_node, node(), pub_type_based}
+                                |  {process_on_other_node, {node(), proc()}, info}.
 
 
