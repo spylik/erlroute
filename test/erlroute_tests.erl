@@ -1084,6 +1084,147 @@ split_topic_test() ->
     ?assertEqual(["test1","*"], erlroute:split_topic(<<"test1.*">>)),
     ?assertEqual(["*","test1"], erlroute:split_topic(<<"*.test1">>)).
 
+%% =============================================================
+%% Cross-node remote_pub via plain send.
+%%
+%% Verifies that a local publish reaches a subscriber on a remote
+%% node via the {remote_pub, Module, Process, Line, Topic, Payload,
+%% PubType, EtsName} envelope handled by the remote erlroute (i.e.
+%% without any erpc:call/cast on the publish path). Each publisher-
+%% side PubType drives the remote-side dispatch execution. Skipped
+%% automatically when the test runner isn't distributed (node() ==
+%% nonode@nohost) — run with -name/-sname to exercise it.
+%% =============================================================
+cross_node_remote_pub_test_() ->
+    {timeout, 60, fun() ->
+        case is_alive() of
+            false -> ok;
+            true  -> do_cross_node_remote_pub()
+        end
+    end}.
+
+do_cross_node_remote_pub() ->
+    {ok, _} = application:ensure_all_started(erlroute),
+    [_, Host] = string:split(atom_to_list(node()), "@"),
+    PeerName = list_to_atom("erlroute_peer_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    {ok, Peer, PeerNode} = peer:start_link(#{name => PeerName, host => Host}),
+    true = rpc:call(PeerNode, code, set_path, [code:get_path()]),
+    {ok, _} = rpc:call(PeerNode, application, ensure_all_started, [erlroute]),
+
+    Cleanup = fun() ->
+        catch peer:stop(Peer),
+        application:stop(erlroute)
+    end,
+
+    try
+        %% Local erlroute must have learned about the peer (nodeup +
+        %% function_exported erpc check are async).
+        ok = wait_for_peer_in_erlroute_nodes(PeerNode, 3000),
+        _ = sys:get_state(erlroute),
+
+        %% Each publisher-side PubType travels in the envelope and
+        %% drives the remote dispatch path. Note: pub/7 with async
+        %% spawns a sync pub internally, so the envelope reaching
+        %% the remote in this case carries sync — the async handler
+        %% path is exercised by the direct envelope send below.
+        run_remote_pub_variant(PeerNode, sync),
+        run_remote_pub_variant(PeerNode, hybrid),
+        run_remote_pub_variant(PeerNode, async),
+
+        %% Hand-crafted async envelope: ensures the remote handle_info
+        %% clause accepts and dispatches PubType = async.
+        assert_remote_handler_accepts_async_envelope(PeerNode)
+    catch
+        Class:Reason:ST ->
+            Cleanup(),
+            erlang:raise(Class, Reason, ST)
+    end,
+    Cleanup(),
+    ok.
+
+run_remote_pub_variant(PeerNode, PubType) ->
+    Topic   = list_to_binary("erlroute.crossnode.remote_pub." ++ atom_to_list(PubType)),
+    Payload = {hello_from_local, PubType, erlang:unique_integer([positive])},
+    Self    = self(),
+
+    %% Subscriber lives on the peer; forwards anything it receives
+    %% back across the dist link so the test can assert delivery.
+    Forwarder = spawn(PeerNode,
+        fun() ->
+            erlroute:sub(Topic, {process, self(), info}),
+            Self ! {subscribed, PubType},
+            receive Msg -> Self ! {peer_received, PubType, Msg}
+            after 10000 -> ok
+            end
+        end),
+
+    %% Peer's sub call returns only after its erpc:multicall to us
+    %% completes, so when we see {subscribed, _} the subscribe_from_remote
+    %% is already in our mailbox.
+    receive
+        {subscribed, PubType} -> ok
+    after 3000 ->
+        catch exit(Forwarder, kill),
+        ?assertEqual({subscribed, PubType}, timeout)
+    end,
+
+    %% sys:get_state flushes our erlroute mailbox so the local cache
+    %% has the cross-node subscriber registered before we publish.
+    _ = sys:get_state(erlroute),
+
+    EtsName = erlroute:cache_table(?MODULE),
+    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, PubType, EtsName),
+
+    receive
+        {peer_received, PubType, Payload} -> ok
+    after 5000 ->
+        catch exit(Forwarder, kill),
+        ?assertEqual({peer_received, PubType, Payload}, timeout)
+    end.
+
+assert_remote_handler_accepts_async_envelope(PeerNode) ->
+    Topic   = <<"erlroute.crossnode.remote_pub.async_envelope">>,
+    Payload = {async_envelope, erlang:unique_integer([positive])},
+    Self    = self(),
+
+    Forwarder = spawn(PeerNode,
+        fun() ->
+            erlroute:sub(Topic, {process, self(), info}),
+            Self ! envelope_subscribed,
+            receive Msg -> Self ! {peer_dispatched_async, Msg}
+            after 10000 -> ok
+            end
+        end),
+
+    receive envelope_subscribed -> ok
+    after 3000 ->
+        catch exit(Forwarder, kill),
+        erlang:error(envelope_subscribed_timeout)
+    end,
+
+    EtsName = erlroute:cache_table(?MODULE),
+    erlang:send({erlroute, PeerNode},
+                {remote_pub, ?MODULE, self(), ?LINE, Topic, Payload, async, EtsName}),
+
+    receive
+        {peer_dispatched_async, Payload} -> ok
+    after 5000 ->
+        catch exit(Forwarder, kill),
+        ?assertEqual({peer_dispatched_async, Payload}, timeout)
+    end.
+
+wait_for_peer_in_erlroute_nodes(PeerNode, Timeout) when Timeout =< 0 ->
+    ?assertEqual({peer_known_to_local_erlroute, PeerNode}, timeout);
+wait_for_peer_in_erlroute_nodes(PeerNode, Timeout) ->
+    #erlroute_state{erlroute_nodes = Nodes} = sys:get_state(erlroute),
+    case lists:member(PeerNode, Nodes) of
+        true ->
+            ok;
+        false ->
+            timer:sleep(50),
+            wait_for_peer_in_erlroute_nodes(PeerNode, Timeout - 50)
+    end.
+
 setup_start() ->
     start_server().
 
