@@ -1133,7 +1133,12 @@ do_cross_node_remote_pub() ->
 
         %% Hand-crafted async envelope: ensures the remote handle_info
         %% clause accepts and dispatches PubType = async.
-        assert_remote_handler_accepts_async_envelope(PeerNode)
+        assert_remote_handler_accepts_async_envelope(PeerNode),
+
+        %% {process, Name, cast} subscriber should route as
+        %% process_on_other_node + cast — direct dist send to the
+        %% matcher's mailbox, bypassing remote erlroute entirely.
+        run_remote_pub_variant_process_cast(PeerNode)
     catch
         Class:Reason:ST ->
             Cleanup(),
@@ -1180,6 +1185,60 @@ run_remote_pub_variant(PeerNode, PubType) ->
     after 5000 ->
         catch exit(Forwarder, kill),
         ?assertEqual({peer_received, PubType, Payload}, timeout)
+    end.
+
+%% Subscriber on the peer registers itself under a name and subscribes
+%% with {process, Name, cast}. The producer-side route must be
+%% process_on_other_node + cast; the published payload must arrive at
+%% the matcher wrapped in {'$gen_cast', _} (the gen_server cast
+%% envelope), proving the bypass path was taken.
+run_remote_pub_variant_process_cast(PeerNode) ->
+    Topic   = <<"erlroute.crossnode.remote_pub.process_cast">>,
+    Payload = {hello_cast, erlang:unique_integer([positive])},
+    Self    = self(),
+    RegName = list_to_atom("erlroute_test_matcher_" ++
+                           integer_to_list(erlang:unique_integer([positive]))),
+
+    Forwarder = spawn(PeerNode,
+        fun() ->
+            true = register(RegName, self()),
+            erlroute:sub(Topic, {process, RegName, cast}),
+            Self ! cast_subscribed,
+            receive Msg -> Self ! {peer_cast_received, Msg}
+            after 10000 -> ok
+            end
+        end),
+
+    receive cast_subscribed -> ok
+    after 3000 ->
+        catch exit(Forwarder, kill),
+        erlang:error(cast_subscribed_timeout)
+    end,
+
+    _ = sys:get_state(erlroute),
+
+    %% Producer-side route must be the bypass shape — not erlroute_on_other_node.
+    BypassMS = [{#subscriber{topic = Topic,
+                             dest_type = process_on_other_node,
+                             dest = {PeerNode, RegName},
+                             method = cast,
+                             _ = '_'},
+                 [], [true]}],
+    ?assertEqual(1, ets:select_count('$erlroute_subscribers', BypassMS)),
+    RouterMS = [{#subscriber{topic = Topic,
+                             dest_type = erlroute_on_other_node,
+                             _ = '_'},
+                 [], [true]}],
+    ?assertEqual(0, ets:select_count('$erlroute_subscribers', RouterMS)),
+
+    EtsName = erlroute:cache_table(?MODULE),
+    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
+
+    receive
+        {peer_cast_received, {'$gen_cast', Payload}} -> ok
+    after 5000 ->
+        catch exit(Forwarder, kill),
+        ?assertEqual({peer_cast_received, {'$gen_cast', Payload}}, timeout)
     end.
 
 assert_remote_handler_accepts_async_envelope(PeerNode) ->

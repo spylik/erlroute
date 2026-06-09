@@ -185,6 +185,16 @@ handle_info({subscribe_from_remote, FlowSource, {process, Proc, info}, Node}, St
     _ = subscribe(FlowSource, {process_on_other_node, {Node, Proc}, info}),
     {noreply, State};
 
+%% Preserve cast-to-process intent across nodes so the producer can
+%% deliver straight into the matcher's mailbox via dist send, without
+%% any remote-side erlroute hop. Keeps the subscriber-node erlroute
+%% off the dispatch path under high-volume publishers (otherwise its
+%% mailbox backs up with {remote_pub, _} and starves the subscribe
+%% gen_server:call path with 5s timeouts).
+handle_info({subscribe_from_remote, FlowSource, {process, Proc, cast}, Node}, State) ->
+    _ = subscribe(FlowSource, {process_on_other_node, {Node, Proc}, cast}),
+    {noreply, State};
+
 handle_info({subscribe_from_remote, FlowSource, _FlowDest, Node}, State) ->
     _ = subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based}),
     {noreply, State};
@@ -509,6 +519,19 @@ send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {
 send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_atom(Proc) ->
 	erlang:send({Proc, Node}, Payload),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
+
+%% Cast variants: deliver as a gen_server cast envelope direct to the
+%% remote process — bypasses remote erlroute entirely. The dominant
+%% high-volume subscriber shape (e.g. maria's market_frames_filter)
+%% uses {process, Name, cast}; routing it here keeps the subscriber
+%% node's erlroute mailbox empty under load.
+send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_pid(Proc) ->
+    erlang:send(Proc, {'$gen_cast', Payload}),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
+
+send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_atom(Proc) ->
+    erlang:send({Proc, Node}, {'$gen_cast', Payload}),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
 
 % sending to erlroute on other nodes — plain `send` to the registered
 % erlroute on the remote, which fans out locally via handle_info.
