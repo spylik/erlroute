@@ -36,5 +36,17 @@ init([]) ->
         [erlroute]                             % Option lists the modules that this process depends on
     },
 
-    Childrens = [Erlroute],                    % Mapping paraments defined in Server to childrens. We can specify many childrens
+    %% erlroute_router handles the cross-node {remote_pub, _} data plane
+    %% so a publish burst can't back up erlroute's mailbox and starve
+    %% subscribe/unsubscribe gen_server:call traffic.
+    Router = {
+        erlroute_router,
+        {erlroute_router, start_link, []},
+        permanent,
+        5000,
+        worker,
+        [erlroute_router]
+    },
+
+    Childrens = [Erlroute, Router],
     {ok, {RestartStrategy, Childrens}}.

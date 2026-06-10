@@ -1089,11 +1089,13 @@ split_topic_test() ->
 %%
 %% Verifies that a local publish reaches a subscriber on a remote
 %% node via the {remote_pub, Module, Process, Line, Topic, Payload,
-%% PubType, EtsName} envelope handled by the remote erlroute (i.e.
-%% without any erpc:call/cast on the publish path). Each publisher-
-%% side PubType drives the remote-side dispatch execution. Skipped
-%% automatically when the test runner isn't distributed (node() ==
-%% nonode@nohost) — run with -name/-sname to exercise it.
+%% PubType, EtsName} envelope, handled by the remote `erlroute_router'
+%% (which sits next to the main `erlroute' gen_server so a publish
+%% burst can't starve subscribe/unsubscribe gen_server:call traffic).
+%% Each publisher-side PubType drives the remote-side dispatch
+%% execution. Skipped automatically when the test runner isn't
+%% distributed (node() == nonode@nohost) — run with -name/-sname
+%% to exercise it.
 %% =============================================================
 cross_node_remote_pub_test_() ->
     {timeout, 60, fun() ->
@@ -1262,7 +1264,7 @@ assert_remote_handler_accepts_async_envelope(PeerNode) ->
     end,
 
     EtsName = erlroute:cache_table(?MODULE),
-    erlang:send({erlroute, PeerNode},
+    erlang:send({erlroute_router, PeerNode},
                 {remote_pub, ?MODULE, self(), ?LINE, Topic, Payload, async, EtsName}),
 
     receive

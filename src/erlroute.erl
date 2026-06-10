@@ -153,8 +153,7 @@ handle_cast(Msg, State) ->
 -spec handle_info(Message, State) -> Result when
     Message     :: {nodeup, node()}
                  | {nodedown, node()}
-                 | {subscribe_from_remote, flow_source(), flow_dest(), node()}
-                 | {remote_pub, module(), proc(), pos_integer(), topic(), payload(), pub_type(), atom()},
+                 | {subscribe_from_remote, flow_source(), flow_dest(), node()},
     State       :: erlroute_state(),
     Result      :: {noreply, erlroute_state()}.
 
@@ -197,14 +196,6 @@ handle_info({subscribe_from_remote, FlowSource, {process, Proc, cast}, Node}, St
 
 handle_info({subscribe_from_remote, FlowSource, _FlowDest, Node}, State) ->
     _ = subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based}),
-    {noreply, State};
-
-% A remote node forwarded a publish destined for our local subscribers.
-% Fan it out locally with the publisher's original PubType — controls only
-% how the remote dispatches (sync inline / hybrid / async spawn-per-pub);
-% the end-to-end sync semantic was already dropped at the dist boundary.
-handle_info({remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}, State) ->
-    _ = pub(Module, Process, Line, Topic, Payload, PubType, EtsName),
     {noreply, State};
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, #erlroute_state{monitors = Monitors, erlroute_nodes = ErlRouteNodes} = State) ->
@@ -520,11 +511,6 @@ send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {
 	erlang:send({Proc, Node}, Payload),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
 
-%% Cast variants: deliver as a gen_server cast envelope direct to the
-%% remote process — bypasses remote erlroute entirely. The dominant
-%% high-volume subscriber shape (e.g. maria's market_frames_filter)
-%% uses {process, Name, cast}; routing it here keeps the subscriber
-%% node's erlroute mailbox empty under load.
 send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_pid(Proc) ->
     erlang:send(Proc, {'$gen_cast', Payload}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
@@ -533,15 +519,8 @@ send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {
     erlang:send({Proc, Node}, {'$gen_cast', Payload}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
 
-% sending to erlroute on other nodes — plain `send` to the registered
-% erlroute on the remote, which fans out locally via handle_info.
-% Async over Erlang dist: sender never blocks (the inter-node send
-% buffer is the proper back-pressure point), no per-publish process
-% spawn on the remote (which `erpc:cast` would do), and no `erpc:call`
-% timeout — which used to fire under high-volume publishers (e.g.
-% market frames at thousands/sec).
 send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = Node}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
-    erlang:send({?MODULE, Node}, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
+    erlang:send({erlroute_router, Node}, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Node, Method} | Acc]);
 
 % final clause for empty list
