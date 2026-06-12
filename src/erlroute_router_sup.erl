@@ -2,11 +2,8 @@
 %% File:    erlroute_router_sup.erl
 %% @author  Oleksii Semilietov <spylik@gmail.com>
 %%
-%% Supervisor for the erlroute_router pool. Starts N routers (configurable via
-%% `{erlroute, router_pool_size}', default 10), each registered as
-%% erlroute_router_<Index>. one_for_one so a single router crash restarts only
-%% that router; the restarted process announces its new pid to erlroute, which
-%% rebinds affected cross-node routes.
+%% Supervisor for the erlroute_router pool (size from `{erlroute, router_pool_size}',
+%% default 10).
 %% --------------------------------------------------------------------------------
 
 -module(erlroute_router_sup).

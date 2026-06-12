@@ -2,19 +2,8 @@
 %% File:    erlroute_router.erl
 %% @author  Oleksii Semilietov <spylik@gmail.com>
 %%
-%% One member of the cross-node publish dispatch pool. Plain receive loop — no
-%% gen_server overhead. Owned by erlroute_router_sup; N of these run per node
-%% (configurable, default 10).
-%%
-%% Each router owns the data plane for the topics that hash to its index, so a
-%% publish burst on one topic-set can't back up the dispatch of unrelated
-%% topics — and never touches the main erlroute gen_server's mailbox, which
-%% stays free for subscribe / unsubscribe control traffic.
-%%
-%% Addressed cross-node by raw pid: the subscriber node hashes each topic to a
-%% router index, resolves that index to a pid, and hands the pid to publisher
-%% nodes so they send straight here. On restart the registered name re-binds
-%% and we announce our new pid to erlroute, which rebinds remote routes.
+%% One member of the cross-node publish dispatch pool. Plain receive loop owned
+%% by erlroute_router_sup; addressed cross-node by raw pid (see erlroute:assign_router/1).
 %% --------------------------------------------------------------------------------
 
 -module(erlroute_router).
@@ -42,10 +31,8 @@ init(Parent, Index) ->
     _ = announce(Index),
     loop().
 
-%% Tell the local erlroute (if up) our current pid for this index so it can
-%% rebind cross-node routes after a restart. At boot erlroute may not be up
-%% yet — it pulls the pool directly in its own init, so a missed announce
-%% here is harmless.
+% erlroute pulls the pool in its own init, so a missed announce at boot (erlroute
+% not up yet) is harmless; on a restart it lets erlroute rebind remote routes.
 -spec announce(Index :: pos_integer()) -> ok | {router_up, pos_integer(), pid()}.
 
 announce(Index) ->
@@ -59,9 +46,6 @@ announce(Index) ->
 loop() ->
     receive
         {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName} ->
-            %% Crash-proof: a throwing pub must not take the router down, or
-            %% its restart would orphan every remote route pointing at our pid
-            %% until the rebind lands.
             _ = try
                 erlroute:pub(Module, Process, Line, Topic, Payload, PubType, EtsName)
             catch

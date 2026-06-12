@@ -13,8 +13,7 @@
 -record(erlroute_state, {
         erlroute_nodes = []     :: [node()],
         monitors = #{}          :: #{pid() => reference()},
-        % last-known pid per router index — used to rebind cross-node
-        % routes after a router restart (assignment itself is stateless).
+        % last-known pid per router index, for rebind-on-restart detection
         router_pool = #{}       :: #{pos_integer() => pid()}
     }).
 
@@ -82,12 +81,9 @@
         topic = <<"#">>         :: topic()
     }).
 
-% How remote nodes should deliver a (topic, module) back to this node:
-%   - direct: exactly one local subscriber and it is a process — remotes send
-%     straight to it (one network hop per publish, no local pub on our side);
-%   - pool:   two or more local subscribers, or any non-process (function /
-%     poolboy) subscriber — remotes send once to our assigned router, which
-%     fans out locally; keeps a publish crossing the network only once.
+% How remote nodes deliver a (topic, module) back to us. direct: a lone process
+% subscriber, sent to straight (one hop, no local pub). pool: 2+ subscribers or
+% any non-process one, sent once to our router which fans out locally.
 -type delivery_descriptor()     :: 'none'
                                 |  {'direct', proc(), proc_delivery_method()}
                                 |  {'pool', pid() | undefined}.

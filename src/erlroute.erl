@@ -96,10 +96,6 @@ init([]) ->
             named_table
         ]),
     _ = net_kernel:monitor_nodes(true),
-    %% Pull the current router pool (Index => Pid). The pool sup is started
-    %% before us, so all routers are registered and running by now. Used only
-    %% to detect a router's pid changing across a restart (for route rebind);
-    %% assignment itself reads the live registered name.
     Pool = pull_router_pool(),
     Nodes = discover_erlroute_nodes(),
     _ = fetch_subscribtions_from_remote_nodes(Nodes),
@@ -118,11 +114,6 @@ init([]) ->
     Result      :: {reply, term(), erlroute_state()}.
 
 handle_call({subscribe, #flow_source{module = Module, topic = Topic} = FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlrouteNodes, monitors = Monitors} = State) ->
-    %% Snapshot how remotes currently deliver this (topic, module), add the
-    %% local subscriber, then re-propagate only if the delivery mode changed.
-    %% Adding a second subscriber flips direct -> pool: remotes drop the
-    %% direct route to the first process and route through our router instead,
-    %% so a publish crosses the network once and fans out locally.
     Before = delivery_descriptor(Topic, Module),
     ProbablyMoreMonitors = may_establish_monitor(FlowDest, Monitors),
     Result = subscribe(FlowSource, FlowDest),
@@ -198,14 +189,8 @@ handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) -
     _ = unsubscribe_node(Node),
     {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}};
 
-%% A remote node told us the delivery mode for one of its (topic, module)s.
-%% Replace whatever route we held for that node with the new one:
-%%   - direct: send straight to the single subscriber process. For a process
-%%     using `cast' this is the matcher fast-path — straight into its mailbox
-%%     via dist send, no remote-side erlroute hop;
-%%   - pool: send once to the remote's assigned router, which fans out locally.
-%% Removing first keeps exactly one route per (topic, module, node), so a
-%% publish is never sent across the network more than once for that node.
+% Replace whatever route we held for Node with the descriptor it sent, keeping
+% exactly one route per (topic, module, node) — see delivery_descriptor/2.
 handle_info({set_remote_route, FlowSource, Descriptor, Node}, State) ->
     _ = remove_remote_routes(FlowSource, Node),
     _ = case Descriptor of
@@ -220,10 +205,8 @@ handle_info({remove_remote_route, FlowSource, Node}, State) ->
     _ = remove_remote_routes(FlowSource, Node),
     {noreply, State};
 
-%% A local router (re)started and told us its current pid for its index.
-%% At boot this just seeds the ledger; on a genuine restart (pid changed)
-%% we broadcast a rebind so remote nodes repoint their cached routes from
-%% the dead pid to the new one.
+% Seed the ledger at boot; on a restart (pid changed) broadcast a rebind so
+% remote nodes repoint their routes from the dead pid to the new one.
 handle_info({router_up, Index, Pid}, #erlroute_state{router_pool = Pool, erlroute_nodes = Nodes} = State) ->
     NewState = State#erlroute_state{router_pool = maps:put(Index, Pid, Pool)},
     case maps:get(Index, Pool, undefined) of
@@ -236,8 +219,6 @@ handle_info({router_up, Index, Pid}, #erlroute_state{router_pool = Pool, erlrout
             {noreply, NewState}
     end;
 
-%% A remote node's router restarted; repoint every route we hold for that
-%% node from the old router pid to the new one.
 handle_info({rebind_remote_router, Node, OldPid, NewPid}, State) ->
     _ = rebind_routes(Node, OldPid, NewPid),
     {noreply, State};
@@ -563,14 +544,8 @@ send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {
     erlang:send({Proc, Node}, {'$gen_cast', Payload}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
 
-% Cross-node fan-out: plain `send` straight to the assigned router pid on the
-% remote node (chosen by the subscriber by hashing the topic, so the same
-% topic always lands on the same router — preserving per-topic order). The
-% router dispatches off the main erlroute process, so a publish burst can't
-% back up control-plane traffic. Async over Erlang dist — sender never blocks
-% (the inter-node send buffer is the back-pressure point), no per-publish
-% process spawn on the remote, and no erpc:call timeout (which used to fire
-% under high-volume publishers like market_frames at thousands/sec).
+% Plain dist `send` to the assigned router pid on the remote node; it fans out
+% off the main erlroute process there.
 send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = {_Node, RouterPid} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
     erlang:send(RouterPid, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
@@ -781,9 +756,7 @@ unsub(FlowSource, FlowDest) when is_list(FlowSource) ->
             end
         }, FlowDest).
 
-% @doc Remove a single local subscriber (its #subscriber and #cached_route).
-% Cross-node propagation is handled separately by the caller via the delivery
-% descriptor diff.
+% Remove one local subscriber; the caller handles cross-node propagation.
 -spec delete_local_subscriber(FlowSource, FlowDest) -> ok when
     FlowSource  :: flow_source(),
     FlowDest    :: flow_dest().
@@ -803,9 +776,7 @@ delete_local_subscriber(#flow_source{module = Module, topic = Topic}, {DestType,
     end, CacheEtsSes),
     ok.
 
-% @doc Remove every local process subscription owned by a (dead) pid, returning
-% the distinct {Topic, Module} pairs it touched so the caller can re-evaluate
-% their delivery descriptors.
+% Remove all local process subscriptions for a pid; returns the {Topic, Module}s touched.
 -spec delete_local_process(Pid) -> [{topic(), module()}] when
     Pid :: pid().
 
@@ -818,8 +789,7 @@ delete_local_process(Pid) ->
     end, erlroute_cache_etses()),
     Affected.
 
-% @doc A monitored local subscriber process died: drop its subscriptions and
-% re-propagate the affected (topic, module) descriptors to remote nodes.
+% A monitored subscriber died: drop its subscriptions and re-propagate descriptors.
 -spec unsubscribe_local_pid(Pid, ErlRouteNodes) -> ok when
     Pid             :: pid(),
     ErlRouteNodes   :: [node()].
@@ -834,9 +804,7 @@ unsubscribe_local_pid(Pid, ErlRouteNodes) ->
     end, Befores),
     ok.
 
-% @doc Remove every cross-node route (direct or pool) we hold pointing at Node
-% for a (topic, module). Used to replace a node's route when its delivery mode
-% changes, or to clear it entirely.
+% Remove every cross-node route (direct or pool) we hold to Node for a (topic, module).
 -spec remove_remote_routes(FlowSource, Node) -> ok when
     FlowSource  :: flow_source(),
     Node        :: node().
@@ -1133,11 +1101,8 @@ erlroute_cache_etses() ->
 -spec fetch_flow_dests_and_sources() -> Result when
     Result      :: [{flow_source(), delivery_descriptor()}].
 
-%% Enumerate our local subscriptions, grouped by (topic, module), so a
-%% (re)joining node can rebuild exactly one route per group back to us — using
-%% the same direct/pool decision the live subscribe path applies. Routes
-%% learned from other nodes (process_on_other_node / erlroute_on_other_node)
-%% are not re-propagated.
+% Our local subscriptions as one delivery_descriptor/2 per (topic, module), for
+% a (re)joining node to rebuild routes back to us. Remote-held routes excluded.
 fetch_flow_dests_and_sources() ->
     Groups = lists:foldl(fun
         (#subscriber{dest_type = DestType, topic = Topic, module = Module, dest = Dest, method = Method}, Acc)
@@ -1159,8 +1124,7 @@ fetch_flow_dests_and_sources() ->
 
 % --------------------------- cross-node delivery -----------------------------
 
-% @doc Local subscribers (process / poolboy / function — i.e. not routes we
-% hold to other nodes) for a (topic, module), as {DestType, Dest, Method}.
+% Local subscribers (not routes we hold to other nodes) for a (topic, module).
 -spec local_subscribers(Topic, Module) -> [{dest_type(), dest(), delivery_method()}] when
     Topic   :: topic(),
     Module  :: 'undefined' | module().
@@ -1171,9 +1135,7 @@ local_subscribers(Topic, Module) ->
           [{'andalso', {'=/=', '$1', process_on_other_node}, {'=/=', '$1', erlroute_on_other_node}}],
           [{{'$1', '$2', '$3'}}]}]).
 
-% @doc How remote nodes should currently deliver this (topic, module) to us:
-% one process subscriber -> direct; anything else (>1, or a non-process) ->
-% pool; nothing -> none.
+% How remote nodes should deliver this (topic, module) to us (see the type).
 -spec delivery_descriptor(Topic, Module) -> delivery_descriptor() when
     Topic   :: topic(),
     Module  :: 'undefined' | module().
@@ -1188,8 +1150,7 @@ delivery_descriptor(Topic, Module) ->
             {pool, assign_router(Topic)}
     end.
 
-% @doc Recompute the descriptor for a (topic, module) after a local change and,
-% if the delivery mode flipped, push the new route shape to remote nodes.
+% Re-propagate to remotes only if the local change flipped the descriptor.
 -spec propagate_local_change(Topic, Module, Before, ErlRouteNodes) -> ok when
     Topic           :: topic(),
     Module          :: 'undefined' | module(),
@@ -1230,11 +1191,8 @@ router_pool_size() ->
 router_name(Index) when is_integer(Index) ->
     list_to_atom("erlroute_router_" ++ integer_to_list(Index)).
 
-% @doc Resolve the local router pid assigned to a topic. Assignment is a stable
-% hash of the topic onto the pool, so every subscription for the same topic maps
-% to the same router (preserving per-topic message order on the publish path).
-% Resolves the live registered name, so it always returns the current pid even
-% right after a router restart.
+% Stable hash of a topic onto the live pool: same topic -> same router (so
+% per-topic order is preserved), resolved by name so it survives restarts.
 -spec assign_router(Topic) -> pid() | undefined when
     Topic :: topic().
 
@@ -1242,9 +1200,7 @@ assign_router(Topic) when is_binary(Topic) ->
     Index = erlang:phash2(Topic, router_pool_size()) + 1,
     whereis(router_name(Index)).
 
-% @doc Snapshot the running pool (Index => Pid) from the pool supervisor. Used
-% only to detect a router's pid changing across a restart. Returns #{} if the
-% pool supervisor isn't running (e.g. erlroute started standalone in tests).
+% Snapshot the pool (Index => Pid) for restart detection; #{} if no pool sup.
 -spec pull_router_pool() -> #{pos_integer() => pid()}.
 
 pull_router_pool() ->
@@ -1258,8 +1214,7 @@ pull_router_pool() ->
         _:_ -> #{}
     end.
 
-% @doc Repoint every cross-node route we hold for Node from a dead router pid to
-% its restarted pid, in both the subscribers table and the cache tables.
+% Repoint every route we hold to Node from a dead router pid to its restarted pid.
 -spec rebind_routes(Node, OldPid, NewPid) -> ok when
     Node    :: node(),
     OldPid  :: pid(),
