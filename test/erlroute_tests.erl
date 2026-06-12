@@ -1181,7 +1181,17 @@ do_cross_node_remote_pub() ->
         %% Function subscriber → erlroute_on_other_node route addressed by
         %% the peer's assigned router pid. Exercises the full pool path:
         %% assignment, pid propagation, and direct-to-router publish.
-        run_remote_pub_variant_function(PeerNode)
+        run_remote_pub_variant_function(PeerNode),
+
+        %% Two process subscribers on the peer for the same topic must flip
+        %% the publisher to a single pool route (one network send), and both
+        %% must receive exactly once.
+        run_multi_process_flips_to_pool(PeerNode),
+
+        %% A process + a function subscriber on the peer for the same topic
+        %% must both be served via the single pool route, each exactly once
+        %% (no double delivery to the process).
+        run_mixed_process_and_function_via_pool(PeerNode)
     catch
         Class:Reason:ST ->
             Cleanup(),
@@ -1366,6 +1376,98 @@ run_remote_pub_variant_function(PeerNode) ->
     after 5000 ->
         catch exit(Forwarder, kill),
         ?assertEqual({peer_function_received, Payload}, timeout)
+    end.
+
+%% Spawn a peer process that subscribes itself to Topic as {process, self,
+%% Method}, then reports the first message it gets plus whether a second
+%% (duplicate) arrives shortly after. Returns its pid.
+spawn_peer_process_subscriber(PeerNode, Topic, Method, Tag, ReportTo) ->
+    spawn(PeerNode,
+        fun() ->
+            erlroute:sub(Topic, {process, self(), Method}),
+            ReportTo ! {peer_subscribed, Tag},
+            First = receive M -> M after 10000 -> none end,
+            %% if direct + pool routes coexisted we'd get a duplicate here
+            Extra = receive M2 -> {extra, M2} after 500 -> no_extra end,
+            ReportTo ! {peer_got, Tag, First, Extra}
+        end).
+
+%% Two distinct process subscribers on the peer for one topic: the publisher
+%% must collapse to a single pool route (one send over the wire), and both
+%% subscribers must receive the payload exactly once.
+run_multi_process_flips_to_pool(PeerNode) ->
+    Topic   = <<"erlroute.crossnode.multi_process">>,
+    Payload = {multi_proc, erlang:unique_integer([positive])},
+    Self    = self(),
+
+    P1 = spawn_peer_process_subscriber(PeerNode, Topic, info, p1, Self),
+    receive {peer_subscribed, p1} -> ok after 3000 -> erlang:error(p1_subscribe_timeout) end,
+    _ = sys:get_state(erlroute),
+
+    P2 = spawn_peer_process_subscriber(PeerNode, Topic, info, p2, Self),
+    receive {peer_subscribed, p2} -> ok after 3000 -> erlang:error(p2_subscribe_timeout) end,
+    _ = sys:get_state(erlroute),
+
+    %% Publisher-side: exactly one pool route to the peer, no direct routes.
+    PoolMS = [{#subscriber{topic = Topic, dest_type = erlroute_on_other_node, dest = {PeerNode, '_'}, _ = '_'},
+               [], [true]}],
+    DirectMS = [{#subscriber{topic = Topic, dest_type = process_on_other_node, dest = {PeerNode, '_'}, _ = '_'},
+                 [], [true]}],
+    ?assertEqual(1, ets:select_count('$erlroute_subscribers', PoolMS)),
+    ?assertEqual(0, ets:select_count('$erlroute_subscribers', DirectMS)),
+
+    EtsName = erlroute:cache_table(?MODULE),
+    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
+
+    assert_peer_got_once(p1, Payload),
+    assert_peer_got_once(p2, Payload),
+    catch exit(P1, kill),
+    catch exit(P2, kill).
+
+%% A process subscriber and a function subscriber on the peer for one topic:
+%% both served by the single pool route, each exactly once (the process must
+%% not also get a direct copy).
+run_mixed_process_and_function_via_pool(PeerNode) ->
+    Topic   = <<"erlroute.crossnode.mixed">>,
+    Payload = {mixed, erlang:unique_integer([positive])},
+    Self    = self(),
+
+    P = spawn_peer_process_subscriber(PeerNode, Topic, info, mixed_proc, Self),
+    receive {peer_subscribed, mixed_proc} -> ok after 3000 -> erlang:error(mixed_proc_timeout) end,
+    _ = sys:get_state(erlroute),
+
+    F = spawn(PeerNode,
+        fun() ->
+            erlroute:sub(Topic, fun(Pl) -> Self ! {peer_got, mixed_fun, Pl, no_extra} end),
+            Self ! {peer_subscribed, mixed_fun},
+            receive _ -> ok after 10000 -> ok end
+        end),
+    receive {peer_subscribed, mixed_fun} -> ok after 3000 -> erlang:error(mixed_fun_timeout) end,
+    _ = sys:get_state(erlroute),
+
+    %% Mixed subscribers force the pool route; no direct route to the process.
+    PoolMS = [{#subscriber{topic = Topic, dest_type = erlroute_on_other_node, dest = {PeerNode, '_'}, _ = '_'},
+               [], [true]}],
+    DirectMS = [{#subscriber{topic = Topic, dest_type = process_on_other_node, dest = {PeerNode, '_'}, _ = '_'},
+                 [], [true]}],
+    ?assertEqual(1, ets:select_count('$erlroute_subscribers', PoolMS)),
+    ?assertEqual(0, ets:select_count('$erlroute_subscribers', DirectMS)),
+
+    EtsName = erlroute:cache_table(?MODULE),
+    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
+
+    assert_peer_got_once(mixed_proc, Payload),
+    assert_peer_got_once(mixed_fun, Payload),
+    catch exit(P, kill),
+    catch exit(F, kill).
+
+assert_peer_got_once(Tag, Payload) ->
+    receive
+        {peer_got, Tag, Got, Extra} ->
+            ?assertEqual(Payload, Got),
+            ?assertEqual(no_extra, Extra)
+    after 5000 ->
+        ?assertEqual({peer_got, Tag, Payload}, timeout)
     end.
 
 %% =============================================================

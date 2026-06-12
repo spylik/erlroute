@@ -82,6 +82,16 @@
         topic = <<"#">>         :: topic()
     }).
 
+% How remote nodes should deliver a (topic, module) back to this node:
+%   - direct: exactly one local subscriber and it is a process — remotes send
+%     straight to it (one network hop per publish, no local pub on our side);
+%   - pool:   two or more local subscribers, or any non-process (function /
+%     poolboy) subscriber — remotes send once to our assigned router, which
+%     fans out locally; keeps a publish crossing the network only once.
+-type delivery_descriptor()     :: 'none'
+                                |  {'direct', proc(), proc_delivery_method()}
+                                |  {'pool', pid() | undefined}.
+
 -type flow_source()             :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
 -type flow_dest()               :: {process, proc(), proc_delivery_method()}
                                 |  {poolboy, atom(), proc_delivery_method()}
