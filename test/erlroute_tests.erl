@@ -1570,6 +1570,173 @@ wait_route_rebound(Topic, Expected, N) ->
         _ -> timer:sleep(100), wait_route_rebound(Topic, Expected, N - 1)
     end.
 
+%% =============================================================
+%% Multi-node (3 nodes, full mesh): one publish must reach each
+%% subscriber exactly once. Guards against a node re-forwarding a
+%% remote_pub to its own cross-node routes (duplicate delivery).
+%% =============================================================
+cross_node_multi_node_no_dup_test_() ->
+    {timeout, 60, fun() ->
+        case is_alive() of
+            false -> ok;
+            true  -> do_cross_node_multi_node_no_dup()
+        end
+    end}.
+
+do_cross_node_multi_node_no_dup() ->
+    %% Keep the controller out of the erlroute mesh: with it running, the
+    %% fresh peers pull its accumulated subscriptions from earlier tests on
+    %% join, which perturbs dispatch and hides the bug. A clean 3-peer mesh
+    %% is the faithful reproduction.
+    _ = application:stop(erlroute),
+    [_, Host] = string:split(atom_to_list(node()), "@"),
+    %% Three fresh peers in a full mesh; publish from one of them. (Publishing
+    %% from the test/controller node hides the bug — its cache carries state
+    %% from earlier tests.)
+    {ok, PeerA, NodeA} = start_erlroute_peer(Host, "erlroute_mn_a"),
+    {ok, PeerB, NodeB} = start_erlroute_peer(Host, "erlroute_mn_b"),
+    {ok, PeerC, NodeC} = start_erlroute_peer(Host, "erlroute_mn_c"),
+    StopPeers = fun() -> [catch peer:stop(P) || P <- [PeerA, PeerB, PeerC]] end,
+    Cleanup = fun() -> StopPeers(), application:stop(erlroute) end,
+    Nodes = [NodeA, NodeB, NodeC],
+    Topic = <<"erlroute.crossnode.multi_node">>,
+    Self  = self(),
+
+    try
+        ok = wait_erlroute_mesh(Nodes, 8000),
+
+        %% Every node has one function subscriber for the topic. Each reports
+        %% a tagged hit so we can count deliveries per node.
+        Forwarders = [subscribe_reporter(N, Topic, Tag, Self)
+                      || {N, Tag} <- [{NodeA, a}, {NodeB, b}, {NodeC, c}]],
+
+        %% Each node should now hold a route to each of the other two.
+        ok = wait_remote_route_count(Nodes, Topic, 2, 8000),
+
+        %% Publish ONCE from a peer.
+        _ = rpc:call(NodeA, erlroute, pub,
+                     [?MODULE, mn_publisher, ?LINE, Topic,
+                      {mn_payload, erlang:unique_integer([positive])},
+                      hybrid, erlroute:cache_table(?MODULE)]),
+
+        %% Capped: a re-forward storm trips the cap and fails the assertion
+        %% instead of hanging the suite.
+        Hits = collect_tagged_hits(#{}, 20),
+        [catch exit(F, kill) || F <- Forwarders],
+        StopPeers(),
+        ?assertEqual(#{a => 1, b => 1, c => 1}, Hits)
+    catch
+        Class:Reason:ST ->
+            Cleanup(),
+            erlang:raise(Class, Reason, ST)
+    end,
+    Cleanup(),
+    ok.
+
+start_erlroute_peer(Host, Prefix) ->
+    Name = list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    {ok, Peer, Node} = peer:start_link(#{name => Name, host => Host}),
+    true = rpc:call(Node, code, set_path, [code:get_path()]),
+    {ok, _} = rpc:call(Node, application, ensure_all_started, [erlroute]),
+    {ok, Peer, Node}.
+
+subscribe_reporter(Node, Topic, Tag, ReportTo) ->
+    Forwarder = spawn(Node,
+        fun() ->
+            erlroute:sub(Topic, fun(_P) -> ReportTo ! {mn_hit, Tag} end),
+            ReportTo ! {mn_subbed, Tag},
+            receive _ -> ok after 30000 -> ok end
+        end),
+    receive {mn_subbed, Tag} -> ok after 3000 -> erlang:error({mn_sub_timeout, Tag}) end,
+    Forwarder.
+
+wait_erlroute_mesh(_Nodes, Timeout) when Timeout =< 0 ->
+    erlang:error(erlroute_mesh_not_formed);
+wait_erlroute_mesh(Nodes, Timeout) ->
+    Ready = lists:all(fun(N) ->
+        case rpc:call(N, sys, get_state, [erlroute]) of
+            #erlroute_state{erlroute_nodes = Ns} ->
+                lists:all(fun(Other) -> lists:member(Other, Ns) end, Nodes -- [N]);
+            _ ->
+                false
+        end
+    end, Nodes),
+    case Ready of
+        true  -> ok;
+        false -> timer:sleep(100), wait_erlroute_mesh(Nodes, Timeout - 100)
+    end.
+
+wait_remote_route_count(_Nodes, _Topic, _Expected, Timeout) when Timeout =< 0 ->
+    erlang:error(remote_routes_not_ready);
+wait_remote_route_count(Nodes, Topic, Expected, Timeout) ->
+    MS = [{#subscriber{topic = Topic, dest_type = erlroute_on_other_node, _ = '_'}, [], [true]}],
+    Ready = lists:all(fun(N) ->
+        rpc:call(N, ets, select_count, ['$erlroute_subscribers', MS]) =:= Expected
+    end, Nodes),
+    case Ready of
+        true  -> ok;
+        false -> timer:sleep(100), wait_remote_route_count(Nodes, Topic, Expected, Timeout - 100)
+    end.
+
+collect_tagged_hits(Acc, Cap) ->
+    case lists:sum(maps:values(Acc)) >= Cap of
+        true ->
+            Acc;
+        false ->
+            receive
+                {mn_hit, Tag} ->
+                    collect_tagged_hits(maps:update_with(Tag, fun(X) -> X + 1 end, 1, Acc), Cap)
+            after 1000 ->
+                Acc
+            end
+    end.
+
+%% =============================================================
+%% Symmetric node discovery: when a peer's erlroute starts after the
+%% dist link is up (so the controller's nodeup check raced ahead of
+%% the peer loading erlroute), both nodes must still end up knowing
+%% each other — no manual nudging.
+%% =============================================================
+cross_node_symmetric_discovery_test_() ->
+    {timeout, 30, fun() ->
+        case is_alive() of
+            false -> ok;
+            true  -> do_cross_node_symmetric_discovery()
+        end
+    end}.
+
+do_cross_node_symmetric_discovery() ->
+    {ok, _} = application:ensure_all_started(erlroute),
+    [_, Host] = string:split(atom_to_list(node()), "@"),
+    {ok, Peer, PeerNode} = start_erlroute_peer(Host, "erlroute_disc"),
+    Self = node(),
+    try
+        ok = wait_until(fun() ->
+            lists:member(PeerNode, erlroute_nodes_of(Self))
+                andalso lists:member(Self, erlroute_nodes_of(PeerNode))
+        end, 8000)
+    catch
+        Class:Reason:ST ->
+            catch peer:stop(Peer),
+            application:stop(erlroute),
+            erlang:raise(Class, Reason, ST)
+    end,
+    catch peer:stop(Peer),
+    application:stop(erlroute),
+    ok.
+
+erlroute_nodes_of(Node) ->
+    #erlroute_state{erlroute_nodes = Ns} = rpc:call(Node, sys, get_state, [erlroute]),
+    Ns.
+
+wait_until(_Pred, Timeout) when Timeout =< 0 ->
+    erlang:error(condition_not_reached);
+wait_until(Pred, Timeout) ->
+    case Pred() of
+        true  -> ok;
+        false -> timer:sleep(100), wait_until(Pred, Timeout - 100)
+    end.
+
 wait_for_peer_in_erlroute_nodes(PeerNode, Timeout) when Timeout =< 0 ->
     ?assertEqual({peer_known_to_local_erlroute, PeerNode}, timeout);
 wait_for_peer_in_erlroute_nodes(PeerNode, Timeout) ->

@@ -99,6 +99,10 @@ init([]) ->
     Pool = pull_router_pool(),
     Nodes = discover_erlroute_nodes(),
     _ = fetch_subscribtions_from_remote_nodes(Nodes),
+    %% Announce ourselves to everyone we're already connected to, so erlroute
+    %% nodes that were up before us (and whose own nodeup for us fired before
+    %% our erlroute was loaded) learn about us too. See handle_info(erlroute_hello).
+    _ = announce_to_nodes(nodes()),
     {ok, #erlroute_state{erlroute_nodes = Nodes, router_pool = Pool}}.
 
 %--------------handle_call-----------------
@@ -159,6 +163,7 @@ handle_cast(Msg, State) ->
 -spec handle_info(Message, State) -> Result when
     Message     :: {nodeup, node()}
                  | {nodedown, node()}
+                 | {erlroute_hello, node()}
                  | {set_remote_route, flow_source(), delivery_descriptor(), node()}
                  | {remove_remote_route, flow_source(), node()}
                  | {router_up, pos_integer(), pid()}
@@ -166,28 +171,35 @@ handle_cast(Msg, State) ->
     State       :: erlroute_state(),
     Result      :: {noreply, erlroute_state()}.
 
-% todo: populate to that node our subscribtions
-handle_info({nodeup, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
-    case node() =/= Node of
-        true ->
-            try erpc:call(Node, erlang, function_exported, [?MODULE, start_link, 0], ?DEFAULT_TIMEOUT_FOR_RPC) of
-                true ->
-                    _ = fetch_subscribtions_from_remote_nodes([Node]),
-                    {noreply, State#erlroute_state{erlroute_nodes = lists:uniq([Node | Nodes])}};
-                false ->
-                    {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}}
-            catch
-                _:_ ->
-                    {noreply, State}
-            end;
-        false ->
-            {noreply, State}
-    end;
+% A node connected. Say hello; if it runs erlroute it adds us and hellos back,
+% which is where we learn it (handle_info(erlroute_hello)). Non-erlroute nodes
+% drop the hello. This replaces a one-shot erpc check that raced a peer whose
+% erlroute hadn't loaded yet, leaving discovery permanently asymmetric.
+handle_info({nodeup, Node}, State) ->
+    _ = case Node =/= node() of
+        true  -> announce_to(Node);
+        false -> ok
+    end,
+    {noreply, State};
 
 % todo: unsubscribe that node after some timeout
 handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
     _ = unsubscribe_node(Node),
     {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}};
+
+% A peer announced itself. If it's new, learn it, pull its subscriptions, and
+% hello back so it learns us — symmetric even if both started at once or one's
+% nodeup fired too early. Already-known peers are ignored, so the handshake
+% settles in a couple of messages.
+handle_info({erlroute_hello, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
+    case Node =:= node() orelse lists:member(Node, Nodes) of
+        true ->
+            {noreply, State};
+        false ->
+            _ = fetch_subscribtions_from_remote_nodes([Node]),
+            _ = announce_to(Node),
+            {noreply, State#erlroute_state{erlroute_nodes = [Node | Nodes]}}
+    end;
 
 % Replace whatever route we held for Node with the descriptor it sent, keeping
 % exactly one route per (topic, module, node) — see delivery_descriptor/2.
@@ -528,26 +540,28 @@ send([#cached_route{dest_type = 'poolboy', method = Method, dest = PoolName}|T],
     end,
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{PoolName, Method} | Acc]);
 
+% Cross-node routes. Under local-only dispatch (a router fanning out an inbound
+% remote_pub, see erlroute_router) these are skipped: the originating publisher
+% already reached every node, so re-forwarding would just duplicate / loop. The
+% route is still marked in Acc so post_hitcache won't resend it.
 send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_pid(Proc) ->
-	erlang:send(Proc, Payload),
+    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send(Proc, Payload),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
 
 send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_atom(Proc) ->
-	erlang:send({Proc, Node}, Payload),
+    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send({Proc, Node}, Payload),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
 
 send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_pid(Proc) ->
-    erlang:send(Proc, {'$gen_cast', Payload}),
+    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send(Proc, {'$gen_cast', Payload}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
 
 send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_atom(Proc) ->
-    erlang:send({Proc, Node}, {'$gen_cast', Payload}),
+    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send({Proc, Node}, {'$gen_cast', Payload}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
 
-% Plain dist `send` to the assigned router pid on the remote node; it fans out
-% off the main erlroute process there.
 send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = {_Node, RouterPid} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
-    erlang:send(RouterPid, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
+    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send(RouterPid, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
 
 % final clause for empty list
@@ -992,6 +1006,18 @@ gen_static_fun_dest(Node, MFA) ->
             erpc:call(Node, ?MODULE, gen_static_fun_dest, ['$local', MFA], ?DEFAULT_TIMEOUT_FOR_RPC)
     end.
 
+% Tell erlroute on a node we exist. Dropped silently if it isn't running there.
+-spec announce_to(Node :: node()) -> ok.
+
+announce_to(Node) ->
+    _ = erlang:send({?MODULE, Node}, {erlroute_hello, node()}),
+    ok.
+
+-spec announce_to_nodes(Nodes :: [node()]) -> ok.
+
+announce_to_nodes(Nodes) ->
+    lists:foreach(fun announce_to/1, Nodes).
+
 % @doc Discrover erlang nodes which have erlroute
 -spec discover_erlroute_nodes() -> Result when
     Result  :: [node()].
@@ -1193,12 +1219,18 @@ router_name(Index) when is_integer(Index) ->
 
 % Stable hash of a topic onto the live pool: same topic -> same router (so
 % per-topic order is preserved), resolved by name so it survives restarts.
--spec assign_router(Topic) -> pid() | undefined when
+% Crashes if the assigned router isn't registered — a missing pool must fail
+% loudly, never silently degrade to an unroutable {pool, undefined}.
+-spec assign_router(Topic) -> pid() when
     Topic :: topic().
 
 assign_router(Topic) when is_binary(Topic) ->
     Index = erlang:phash2(Topic, router_pool_size()) + 1,
-    whereis(router_name(Index)).
+    Name = router_name(Index),
+    case whereis(Name) of
+        Pid when is_pid(Pid) -> Pid;
+        undefined -> error({erlroute_router_not_registered, Name})
+    end.
 
 % Snapshot the pool (Index => Pid) for restart detection; #{} if no pool sup.
 -spec pull_router_pool() -> #{pos_integer() => pid()}.

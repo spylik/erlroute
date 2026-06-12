@@ -86,7 +86,7 @@
 % any non-process one, sent once to our router which fans out locally.
 -type delivery_descriptor()     :: 'none'
                                 |  {'direct', proc(), proc_delivery_method()}
-                                |  {'pool', pid() | undefined}.
+                                |  {'pool', pid()}.
 
 -type flow_source()             :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
 -type flow_dest()               :: {process, proc(), proc_delivery_method()}
