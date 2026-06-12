@@ -8,9 +8,14 @@
         topic/0
     ]).
 
+-define(DEFAULT_ROUTER_POOL_SIZE, 10).
+
 -record(erlroute_state, {
         erlroute_nodes = []     :: [node()],
-        monitors = #{}          :: #{pid() => reference()}
+        monitors = #{}          :: #{pid() => reference()},
+        % last-known pid per router index — used to rebind cross-node
+        % routes after a router restart (assignment itself is stateless).
+        router_pool = #{}       :: #{pos_integer() => pid()}
     }).
 
 -type matchspec()           :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
@@ -81,7 +86,7 @@
 -type flow_dest()               :: {process, proc(), proc_delivery_method()}
                                 |  {poolboy, atom(), proc_delivery_method()}
                                 |  {function, fun_dest(), function_delivery_method()}
-                                |  {erlroute_on_other_node, node(), pub_type_based}
-                                |  {process_on_other_node, {node(), proc()}, info}.
+                                |  {erlroute_on_other_node, {node(), pid()} | node(), pub_type_based}
+                                |  {process_on_other_node, {node(), proc()}, proc_delivery_method()}.
 
 

@@ -27,6 +27,20 @@ init([]) ->
         10                                     % Timeout (need read and test more about timeout strategy)
     }, 
 
+    %% The router pool handles the cross-node {remote_pub, _} data plane so a
+    %% publish burst can't back up erlroute's mailbox and starve
+    %% subscribe/unsubscribe gen_server:call traffic. Started BEFORE erlroute
+    %% so the routers are registered and running when erlroute pulls the pool
+    %% in its init.
+    RouterSup = {
+        erlroute_router_sup,
+        {erlroute_router_sup, start_link, []},
+        permanent,
+        infinity,
+        supervisor,
+        [erlroute_router_sup]
+    },
+
     Erlroute = {
         erlroute,                              % ID
         {erlroute, start_link, []},            % Start
@@ -36,17 +50,5 @@ init([]) ->
         [erlroute]                             % Option lists the modules that this process depends on
     },
 
-    %% erlroute_router handles the cross-node {remote_pub, _} data plane
-    %% so a publish burst can't back up erlroute's mailbox and starve
-    %% subscribe/unsubscribe gen_server:call traffic.
-    Router = {
-        erlroute_router,
-        {erlroute_router, start_link, []},
-        permanent,
-        5000,
-        worker,
-        [erlroute_router]
-    },
-
-    Childrens = [Erlroute, Router],
+    Childrens = [RouterSup, Erlroute],
     {ok, {RestartStrategy, Childrens}}.

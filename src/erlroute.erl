@@ -46,7 +46,9 @@
         post_hitcache_routine/9,
         gen_static_fun_dest/2,
         fetch_flow_dests_and_sources/0,
-        erlroute_cache_etses/0
+        erlroute_cache_etses/0,
+        router_name/1,         % router pool support (erlroute_router / _sup)
+        router_pool_size/0
     ]).
 
 % ----------------------------- gen_server part --------------------------------
@@ -94,9 +96,14 @@ init([]) ->
             named_table
         ]),
     _ = net_kernel:monitor_nodes(true),
+    %% Pull the current router pool (Index => Pid). The pool sup is started
+    %% before us, so all routers are registered and running by now. Used only
+    %% to detect a router's pid changing across a restart (for route rebind);
+    %% assignment itself reads the live registered name.
+    Pool = pull_router_pool(),
     Nodes = discover_erlroute_nodes(),
     _ = fetch_subscribtions_from_remote_nodes(Nodes),
-    {ok, #erlroute_state{erlroute_nodes = Nodes}}.
+    {ok, #erlroute_state{erlroute_nodes = Nodes, router_pool = Pool}}.
 
 %--------------handle_call-----------------
 
@@ -113,7 +120,12 @@ init([]) ->
 handle_call({subscribe, FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlrouteNodes, monitors = Monitors} = State) ->
     ProbablyMoreMonitors = may_establish_monitor(FlowDest, Monitors),
     Result = subscribe(FlowSource, FlowDest),
-    _ = erpc:multicall(ErlrouteNodes, erlang, send, [erlroute, {subscribe_from_remote, FlowSource, FlowDest, node()}], ?DEFAULT_TIMEOUT_FOR_RPC),
+    %% Assign this topic to one of our local routers (same topic always maps
+    %% to the same router) and hand its pid to the remote nodes, so when they
+    %% publish they send straight to that router — spreading inbound dispatch
+    %% across the pool instead of funnelling through a single process.
+    RouterPid = assign_router(FlowSource),
+    _ = erpc:multicall(ErlrouteNodes, erlang, send, [erlroute, {subscribe_from_remote, FlowSource, FlowDest, node(), RouterPid}], ?DEFAULT_TIMEOUT_FOR_RPC),
     {reply, Result, State#erlroute_state{monitors = ProbablyMoreMonitors}};
 
 handle_call({unsubscribe, FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlRouteNodes} = State) ->
@@ -153,7 +165,9 @@ handle_cast(Msg, State) ->
 -spec handle_info(Message, State) -> Result when
     Message     :: {nodeup, node()}
                  | {nodedown, node()}
-                 | {subscribe_from_remote, flow_source(), flow_dest(), node()},
+                 | {subscribe_from_remote, flow_source(), flow_dest(), node(), pid() | undefined}
+                 | {router_up, pos_integer(), pid()}
+                 | {rebind_remote_router, node(), pid(), pid()},
     State       :: erlroute_state(),
     Result      :: {noreply, erlroute_state()}.
 
@@ -180,7 +194,7 @@ handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) -
     _ = unsubscribe_node(Node),
     {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}};
 
-handle_info({subscribe_from_remote, FlowSource, {process, Proc, info}, Node}, State) ->
+handle_info({subscribe_from_remote, FlowSource, {process, Proc, info}, Node, _RouterPid}, State) ->
     _ = subscribe(FlowSource, {process_on_other_node, {Node, Proc}, info}),
     {noreply, State};
 
@@ -190,12 +204,37 @@ handle_info({subscribe_from_remote, FlowSource, {process, Proc, info}, Node}, St
 %% off the dispatch path under high-volume publishers (otherwise its
 %% mailbox backs up with {remote_pub, _} and starves the subscribe
 %% gen_server:call path with 5s timeouts).
-handle_info({subscribe_from_remote, FlowSource, {process, Proc, cast}, Node}, State) ->
+handle_info({subscribe_from_remote, FlowSource, {process, Proc, cast}, Node, _RouterPid}, State) ->
     _ = subscribe(FlowSource, {process_on_other_node, {Node, Proc}, cast}),
     {noreply, State};
 
-handle_info({subscribe_from_remote, FlowSource, _FlowDest, Node}, State) ->
-    _ = subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based}),
+%% Everything else (functions, poolboy, ...) routes through the assigned
+%% router on the subscriber's node — we store its pid so publishes land
+%% straight on that pool member.
+handle_info({subscribe_from_remote, FlowSource, _FlowDest, Node, RouterPid}, State) ->
+    _ = subscribe(FlowSource, {erlroute_on_other_node, {Node, RouterPid}, pub_type_based}),
+    {noreply, State};
+
+%% A local router (re)started and told us its current pid for its index.
+%% At boot this just seeds the ledger; on a genuine restart (pid changed)
+%% we broadcast a rebind so remote nodes repoint their cached routes from
+%% the dead pid to the new one.
+handle_info({router_up, Index, Pid}, #erlroute_state{router_pool = Pool, erlroute_nodes = Nodes} = State) ->
+    NewState = State#erlroute_state{router_pool = maps:put(Index, Pid, Pool)},
+    case maps:get(Index, Pool, undefined) of
+        Pid ->
+            {noreply, NewState};
+        undefined ->
+            {noreply, NewState};
+        OldPid ->
+            _ = erpc:multicall(Nodes, erlang, send, [erlroute, {rebind_remote_router, node(), OldPid, Pid}], ?DEFAULT_TIMEOUT_FOR_RPC),
+            {noreply, NewState}
+    end;
+
+%% A remote node's router restarted; repoint every route we hold for that
+%% node from the old router pid to the new one.
+handle_info({rebind_remote_router, Node, OldPid, NewPid}, State) ->
+    _ = rebind_routes(Node, OldPid, NewPid),
     {noreply, State};
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, #erlroute_state{monitors = Monitors, erlroute_nodes = ErlRouteNodes} = State) ->
@@ -519,9 +558,17 @@ send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {
     erlang:send({Proc, Node}, {'$gen_cast', Payload}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
 
-send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = Node}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
-    erlang:send({erlroute_router, Node}, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Node, Method} | Acc]);
+% Cross-node fan-out: plain `send` straight to the assigned router pid on the
+% remote node (chosen by the subscriber by hashing the topic, so the same
+% topic always lands on the same router — preserving per-topic order). The
+% router dispatches off the main erlroute process, so a publish burst can't
+% back up control-plane traffic. Async over Erlang dist — sender never blocks
+% (the inter-node send buffer is the back-pressure point), no per-publish
+% process spawn on the remote, and no erpc:call timeout (which used to fire
+% under high-volume publishers like market_frames at thousands/sec).
+send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = {_Node, RouterPid} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
+    erlang:send(RouterPid, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
 
 % final clause for empty list
 send([], _Payload, _Module, _Process, _Line, _PubType, _Topic, _EtsName, Acc) -> Acc.
@@ -771,7 +818,13 @@ unsubscribe(all, {DestType, Dest}, ErlRouteNodes) ->
     end, TopicsAndModules);
 
 unsubscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, DeliveryMethod}, ErlRouteNodes) ->
-    ets:match_delete(?SUBETS, #subscriber{dest_type = DestType, dest = Dest, module = Module, method = DeliveryMethod, topic = Topic, _ = '_'}),
+    % erlroute_on_other_node routes store dest as {Node, RouterPid}; a remote
+    % unsub only knows the node, so match any router pid for that node.
+    MatchDest = case DestType of
+        erlroute_on_other_node -> {Dest, '_'};
+        _ -> Dest
+    end,
+    ets:match_delete(?SUBETS, #subscriber{dest_type = DestType, dest = MatchDest, module = Module, method = DeliveryMethod, topic = Topic, _ = '_'}),
 
     CacheEtsSes = case Module of
         undefined ->
@@ -783,7 +836,7 @@ unsubscribe(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Deliv
     lists:foreach(fun(CacheEtsName) ->
         % cache table probably not exist yet, so wrapping in a try/catch
         try
-            ets:match_delete(CacheEtsName, #cached_route{dest_type = DestType, topic = Topic, method = DeliveryMethod, dest = Dest, _ = '_'})
+            ets:match_delete(CacheEtsName, #cached_route{dest_type = DestType, topic = Topic, method = DeliveryMethod, dest = MatchDest, _ = '_'})
         catch
             _:_ ->
                 ok
@@ -1022,14 +1075,16 @@ fetch_subscribtions_from_remote_nodes(Nodes) ->
     lists:foreach(fun
         ({_Node, {ok, []}}) ->
             false;
-        ({Node, {ok, FlowSources}}) when is_list(FlowSources) ->
+        ({Node, {ok, Subscriptions}}) when is_list(Subscriptions) ->
             lists:map(fun
-                (#flow_source{} = FlowSource) ->
-                    subscribe(FlowSource, {erlroute_on_other_node, Node, pub_type_based});
-                ({Proc, #flow_source{} = FlowSource}) ->
-                    subscribe(FlowSource, {process_on_other_node, {Node, Proc}, info})
+                ({process_info, Proc, #flow_source{} = FlowSource}) ->
+                    subscribe(FlowSource, {process_on_other_node, {Node, Proc}, info});
+                ({process_cast, Proc, #flow_source{} = FlowSource}) ->
+                    subscribe(FlowSource, {process_on_other_node, {Node, Proc}, cast});
+                ({router, RouterPid, #flow_source{} = FlowSource}) ->
+                    subscribe(FlowSource, {erlroute_on_other_node, {Node, RouterPid}, pub_type_based})
                 end,
-            FlowSources);
+            Subscriptions);
         ({_Node, _OtherResp}) ->
             false
         end,
@@ -1050,10 +1105,10 @@ fetch_subscribtions_from_remote_nodes(Nodes) ->
     Result  :: term(). % todo
 
 unsubscribe_node(Node) ->
-    ets:match_delete(?SUBETS, #subscriber{dest_type = erlroute_on_other_node, dest = Node, _ = '_'}),
+    ets:match_delete(?SUBETS, #subscriber{dest_type = erlroute_on_other_node, dest = {Node, '_'}, _ = '_'}),
     ets:match_delete(?SUBETS, #subscriber{dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'}),
     lists:foreach(fun(CacheEtsName) ->
-        ets:match_delete(CacheEtsName, #cached_route{dest_type = erlroute_on_other_node, dest = Node, _ = '_'}),
+        ets:match_delete(CacheEtsName, #cached_route{dest_type = erlroute_on_other_node, dest = {Node, '_'}, _ = '_'}),
         ets:match_delete(CacheEtsName, #cached_route{dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'})
     end, erlroute_cache_etses()).
 
@@ -1081,8 +1136,18 @@ erlroute_cache_etses() ->
     ).
 
 -spec fetch_flow_dests_and_sources() -> Result when
-    Result      :: [{proc(), flow_source()} | flow_source()].
+    Result      :: [ {'process_info', proc(), flow_source()}
+                   | {'process_cast', proc(), flow_source()}
+                   | {'router', pid() | undefined, flow_source()} ].
 
+%% Enumerate our local subscriptions so a (re)joining node can rebuild routes
+%% back to us. Each entry is tagged with how the remote should deliver:
+%%   - process_info / process_cast: direct dist send to the subscriber process
+%%     (bypasses the remote router entirely);
+%%   - router: everything else, dispatched via our assigned router — we resolve
+%%     the assigned pid here (on this node) so the puller can address it.
+%% Routes learned from other nodes (erlroute_on_other_node / process_on_other_node)
+%% are not re-propagated.
 fetch_flow_dests_and_sources() ->
     lists:foldl(fun
         (#subscriber{dest_type = erlroute_on_other_node}, Acc) ->
@@ -1090,11 +1155,84 @@ fetch_flow_dests_and_sources() ->
         (#subscriber{dest_type = process_on_other_node}, Acc) ->
             Acc;
         (#subscriber{dest_type = process, method = info, dest = Proc, topic = Topic, module = Module}, Acc) ->
-            [{Proc, #flow_source{module = Module, topic = Topic}} | Acc];
+            [{process_info, Proc, #flow_source{module = Module, topic = Topic}} | Acc];
+        (#subscriber{dest_type = process, method = cast, dest = Proc, topic = Topic, module = Module}, Acc) ->
+            [{process_cast, Proc, #flow_source{module = Module, topic = Topic}} | Acc];
         (#subscriber{topic = Topic, module = Module}, Acc) ->
-            [#flow_source{module = Module, topic = Topic} | Acc]
+            [{router, assign_router(Topic), #flow_source{module = Module, topic = Topic}} | Acc]
         end,
     [], ets:tab2list(?SUBETS)).
+
+% ------------------------------- router pool ---------------------------------
+
+% @doc Configured number of routers in the local pool (>= 1).
+-spec router_pool_size() -> pos_integer().
+
+router_pool_size() ->
+    erlang:max(1, application:get_env(erlroute, router_pool_size, ?DEFAULT_ROUTER_POOL_SIZE)).
+
+% @doc Registered name of the router at a given pool index.
+-spec router_name(Index) -> atom() when
+    Index :: pos_integer().
+
+router_name(Index) when is_integer(Index) ->
+    list_to_atom("erlroute_router_" ++ integer_to_list(Index)).
+
+% @doc Resolve the local router pid assigned to a topic. Assignment is a stable
+% hash of the topic onto the pool, so every subscription for the same topic maps
+% to the same router (preserving per-topic message order on the publish path).
+% Resolves the live registered name, so it always returns the current pid even
+% right after a router restart.
+-spec assign_router(FlowSourceOrTopic) -> pid() | undefined when
+    FlowSourceOrTopic :: flow_source() | topic().
+
+assign_router(#flow_source{topic = Topic}) ->
+    assign_router(Topic);
+assign_router(Topic) when is_binary(Topic) ->
+    Index = erlang:phash2(Topic, router_pool_size()) + 1,
+    whereis(router_name(Index)).
+
+% @doc Snapshot the running pool (Index => Pid) from the pool supervisor. Used
+% only to detect a router's pid changing across a restart. Returns #{} if the
+% pool supervisor isn't running (e.g. erlroute started standalone in tests).
+-spec pull_router_pool() -> #{pos_integer() => pid()}.
+
+pull_router_pool() ->
+    try
+        maps:from_list(
+            [{Index, Pid}
+             || {Index, Pid, _Type, _Mods} <- supervisor:which_children(erlroute_router_sup),
+                is_integer(Index), is_pid(Pid)]
+        )
+    catch
+        _:_ -> #{}
+    end.
+
+% @doc Repoint every cross-node route we hold for Node from a dead router pid to
+% its restarted pid, in both the subscribers table and the cache tables.
+-spec rebind_routes(Node, OldPid, NewPid) -> ok when
+    Node    :: node(),
+    OldPid  :: pid(),
+    NewPid  :: pid().
+
+rebind_routes(Node, OldPid, NewPid) ->
+    OldDest = {Node, OldPid},
+    NewDest = {Node, NewPid},
+    lists:foreach(fun(Sub) ->
+        ets:delete_object(?SUBETS, Sub),
+        ets:insert(?SUBETS, Sub#subscriber{dest = NewDest})
+    end, ets:match_object(?SUBETS, #subscriber{dest_type = erlroute_on_other_node, dest = OldDest, _ = '_'})),
+    lists:foreach(fun(CacheEtsName) ->
+        try
+            lists:foreach(fun(Route) ->
+                ets:delete_object(CacheEtsName, Route),
+                ets:insert(CacheEtsName, Route#cached_route{dest = NewDest})
+            end, ets:match_object(CacheEtsName, #cached_route{dest_type = erlroute_on_other_node, dest = OldDest, _ = '_'}))
+        catch
+            _:_ -> ok
+        end
+    end, erlroute_cache_etses()),
+    ok.
 
 % @doc if subsctiber is a process PId, let's establish monitor and unsubscribe when subscriber dies.
 % if subscriber is a registered process, we will keep subscribtion up, as another process may be registered with the same name, so
