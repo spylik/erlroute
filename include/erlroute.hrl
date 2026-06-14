@@ -72,8 +72,7 @@
         key                     :: {topic(), 'undefined' | module(), node()} | matchspec(),
         dest_type               :: 'process_on_other_node' | 'erlroute_on_other_node' | matchspec(),
         dest                    :: dest() | matchspec(),
-        method                  :: delivery_method() | matchspec(),
-        sub_ref                 :: integer() | matchspec()
+        method                  :: delivery_method() | matchspec()
     }).
 
 -record(topics, {

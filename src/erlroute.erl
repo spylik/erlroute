@@ -98,7 +98,7 @@ init([]) ->
             named_table
         ]),
     _ = ets:new(?ROUTERETS, [set, public, named_table, {read_concurrency, true}]),
-    _ = ets:new(?REMOTETS, [set, public, named_table, {keypos, #remote_sub.key}]),
+    _ = ets:new(?REMOTETS, [set, public, named_table, {read_concurrency, true}, {keypos, #remote_sub.key}]),
     Routers = start_routers(router_pool_size()),
     true = ets:insert(?ROUTERETS, [{'$routers', list_to_tuple(Routers)}, {'$next', 0}]),
     _ = net_kernel:monitor_nodes(true),
@@ -775,7 +775,7 @@ unsub(FlowSource) when is_list(FlowSource) -> unsub(FlowSource, {process, self()
 unsub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
-        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' orelse DestType =:= 'erlroute_on_other_node' ->
+        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' ->
     gen_server:call(?MODULE, {unsubscribe, FlowSource, {DestType, Dest, Method}});
 
 % when Dest is pid() or atom
@@ -826,17 +826,13 @@ unsub(FlowSource, FlowDest) when is_list(FlowSource) ->
 
 delete_local_subscriber(#flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) ->
     ets:match_delete(?SUBETS, #subscriber{dest_type = DestType, dest = Dest, module = Module, method = Method, topic = Topic, _ = '_'}),
-    CacheEtsSes = case Module of
-        undefined  -> erlroute_cache_etses();
-        _SomeModule -> [cache_table(Module)]
-    end,
     lists:foreach(fun(CacheEtsName) ->
         try
             ets:match_delete(CacheEtsName, #cached_route{dest_type = DestType, topic = Topic, method = Method, dest = Dest, _ = '_'})
         catch
             _:_ -> ok
         end
-    end, CacheEtsSes),
+    end, cache_etses_for_module(Module)),
     ok.
 
 % Remove all local process subscriptions for a pid (the caller has already
@@ -885,14 +881,20 @@ upsert_remote_route(#flow_source{module = Module, topic = Topic}, Node, Descript
         {direct, Proc, M} -> {process_on_other_node, {Node, Proc}, M};
         {pool, RouterPid} -> {erlroute_on_other_node, {Node, RouterPid}, pub_type_based}
     end,
-    ets:insert(?REMOTETS, #remote_sub{
-        key      = {Topic, Module, Node},
-        dest_type = DestType,
-        dest     = Dest,
-        method   = Method,
-        sub_ref  = gen_id()
-    }),
-    invalidate_remote_cache(Topic, Module, Node).
+    Key = {Topic, Module, Node},
+    case ets:lookup(?REMOTETS, Key) of
+        [#remote_sub{dest_type = DestType, dest = Dest, method = Method}] ->
+            ok;
+        _ ->
+            invalidate_remote_cache(Topic, Module, Node),
+            _ = ets:insert(?REMOTETS, #remote_sub{
+                key       = Key,
+                dest_type = DestType,
+                dest      = Dest,
+                method    = Method
+            }),
+            ok
+    end.
 
 -spec invalidate_remote_cache(Topic, Module, Node) -> ok when
     Topic   :: topic(),
@@ -900,10 +902,6 @@ upsert_remote_route(#flow_source{module = Module, topic = Topic}, Node, Descript
     Node    :: node().
 
 invalidate_remote_cache(Topic, Module, Node) ->
-    CacheEtses = case Module of
-        undefined   -> erlroute_cache_etses();
-        _SomeModule -> [cache_table(Module)]
-    end,
     lists:foreach(fun(CacheEts) ->
         try
             ets:match_delete(CacheEts, #cached_route{topic = Topic, dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'}),
@@ -911,7 +909,7 @@ invalidate_remote_cache(Topic, Module, Node) ->
         catch
             _:_ -> ok
         end
-    end, CacheEtses),
+    end, cache_etses_for_module(Module)),
     ok.
 
 % ================================ end of sub part =============================
@@ -963,7 +961,7 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
     }),
     lists:foldl(
         fun(#subscriber{module = SubscriberModule, dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}, Acc) ->
-            case lists:member({Dest, Method}, WhoGetAlready) of
+            case lists:member({Dest, Method}, Acc) of
                 false when (PostRef =:= undefined orelse PostRef > SubRef) andalso (Module =:= SubscriberModule orelse SubscriberModule =:= undefined) ->
                     ToInsert = #cached_route{
                         topic = Topic,
@@ -972,7 +970,7 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
                         method = Method,
                         parent_topic = {?SUBETS, Topic}
                     },
-                    Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, [], Scope),
+                    Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope),
                     ets:insert(route_table_must_present(EtsName), ToInsert),
                     Toreturn;
                 _NoMatch ->
@@ -1135,6 +1133,12 @@ unsubscribe_node(Node) ->
         ets:match_delete(CacheEtsName, #cached_route{dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'})
     end, erlroute_cache_etses()).
 
+-spec cache_etses_for_module(Module) -> [atom()] when
+    Module :: 'undefined' | module().
+
+cache_etses_for_module(undefined) -> erlroute_cache_etses();
+cache_etses_for_module(Module)    -> [cache_table(Module)].
+
 -spec erlroute_cache_etses() -> Result when
     Result  :: [atom()].
 
@@ -1266,7 +1270,7 @@ assign_router(Topic) when is_binary(Topic) ->
             end
     end.
 
--spec remote_subs_as_subscribers(Topic, Module) -> [#subscriber{}] when
+-spec remote_subs_as_subscribers(Topic, Module) -> [#remote_sub{}] when
     Topic   :: topic(),
     Module  :: 'undefined' | module().
 
@@ -1278,13 +1282,18 @@ remote_subs_as_subscribers(Topic, Module) ->
         undefined -> [];
         _         -> ets:select(?REMOTETS, AnyMS)
     end,
-    [remote_sub_to_subscriber(R) || R <- Exact ++ Any].
-
--spec remote_sub_to_subscriber(RemoteSub) -> #subscriber{} when
-    RemoteSub :: #remote_sub{}.
-
-remote_sub_to_subscriber(#remote_sub{key = {Topic, Module, _Node}, dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}) ->
-    #subscriber{topic = Topic, module = Module, is_final_topic = true, dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}.
+    Wild    = case Topic of
+        <<"#">> -> [];
+        _       ->
+            WildMS  = [{#remote_sub{key = {<<"#">>, Module, '_'}, _ = '_'}, [], ['$_']}],
+            WAnyMS  = [{#remote_sub{key = {<<"#">>, undefined, '_'}, _ = '_'}, [], ['$_']}],
+            ets:select(?REMOTETS, WildMS) ++
+            case Module of
+                undefined -> [];
+                _         -> ets:select(?REMOTETS, WAnyMS)
+            end
+    end,
+    Exact ++ Any ++ Wild.
 
 % @doc if subsctiber is a process PId, let's establish monitor and unsubscribe when subscriber dies.
 % if subscriber is a registered process, we will keep subscribtion up, as another process may be registered with the same name, so

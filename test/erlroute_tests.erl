@@ -1596,11 +1596,7 @@ epmd_running() ->
 
 start_erlroute_peer(Prefix) ->
     Name = list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive]))),
-    %% connection => standard_io: peer signals readiness via stdin/stdout so no
-    %% hostname resolution is needed at startup (default 'dist' would require the
-    %% peer to connect BACK to the controller, which fails when the controller's
-    %% shortname, e.g. "192", is not resolvable).  Subsequent rpc:call goes
-    %% controller→peer at "localhost" which always resolves.
+    %% standard_io: avoids peer→controller dist-link (Mac shortnames not DNS-resolvable).
     {ok, Peer, Node} = peer:start_link(#{name => Name, host => "localhost",
                                          connection => standard_io,
                                          args => ["-setcookie", atom_to_list(erlang:get_cookie())]}),
