@@ -27,8 +27,6 @@ init([]) ->
         10                                     % Timeout (need read and test more about timeout strategy)
     },
 
-    % erlroute owns its router pool directly (spawn_link in its init), so the
-    % pool lives and dies with erlroute — no separate supervisor.
     Erlroute = {
         erlroute,                              % ID
         {erlroute, start_link, []},            % Start

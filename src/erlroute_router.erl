@@ -28,9 +28,6 @@ start_link(Index) ->
 -spec init(Parent :: pid(), Index :: pos_integer()) -> no_return().
 
 init(Parent, Index) ->
-    %% Registering under erlroute_router_<Index> is what makes restarts
-    %% self-healing: publishers address us by {router_name(Index), Node}, so a
-    %% restarted process re-registers the name and delivery resumes — no rebind.
     true = register(erlroute:router_name(Index), self()),
     proc_lib:init_ack(Parent, {ok, self()}),
     loop().
