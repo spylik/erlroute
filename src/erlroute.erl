@@ -47,7 +47,6 @@
         cache_table/1, % export support function for parse_transform
         post_hitcache_routine/10,
         gen_static_fun_dest/2,
-        fetch_flow_dests_and_sources/0,
         erlroute_cache_etses/0
     ]).
 
@@ -102,10 +101,8 @@ init([]) ->
     Routers = start_routers(router_pool_size()),
     true = ets:insert(?ROUTERETS, [{'$routers', list_to_tuple(Routers)}, {'$next', 0}]),
     _ = net_kernel:monitor_nodes(true),
-    Nodes = discover_erlroute_nodes(),
-    _ = fetch_subscribtions_from_remote_nodes(Nodes),
-    _ = announce_to_nodes(nodes()),
-    {ok, #erlroute_state{erlroute_nodes = Nodes}}.
+    _ = ping_nodes(nodes()),
+    {ok, #erlroute_state{}}.
 
 % Spawn the linked, anonymous router pool.
 -spec start_routers(N :: pos_integer()) -> [pid()].
@@ -171,7 +168,8 @@ handle_cast(Msg, State) ->
 -spec handle_info(Message, State) -> Result when
     Message     :: {nodeup, node()}
                  | {nodedown, node()}
-                 | {erlroute_hello, node()}
+                 | {erlroute_ping, node()}
+                 | {erlroute_sync, node(), [{flow_source(), delivery_descriptor()}]}
                  | {set_remote_route, flow_source(), delivery_descriptor(), node()}
                  | {remove_remote_route, flow_source(), node()}
                  | {'DOWN', reference(), process, pid(), term()}
@@ -181,7 +179,7 @@ handle_cast(Msg, State) ->
 
 handle_info({nodeup, Node}, State) ->
     _ = case Node =/= node() of
-        true  -> announce_to(Node);
+        true  -> ping_node(Node);
         false -> ok
     end,
     {noreply, State};
@@ -190,12 +188,23 @@ handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) -
     _ = unsubscribe_node(Node),
     {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}};
 
-handle_info({erlroute_hello, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
+handle_info({erlroute_ping, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
     case Node =:= node() orelse lists:member(Node, Nodes) of
         true ->
             {noreply, State};
         false ->
-            _ = fetch_subscribtions_from_remote_nodes([Node]),
+            _ = announce_to(Node),
+            {noreply, State#erlroute_state{erlroute_nodes = [Node | Nodes]}}
+    end;
+
+handle_info({erlroute_sync, Node, _Descriptors}, State) when Node =:= node() ->
+    {noreply, State};
+handle_info({erlroute_sync, Node, Descriptors}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
+    _ = apply_remote_descriptors(Node, Descriptors),
+    case lists:member(Node, Nodes) of
+        true ->
+            {noreply, State};
+        false ->
             _ = announce_to(Node),
             {noreply, State#erlroute_state{erlroute_nodes = [Node | Nodes]}}
     end;
@@ -1062,88 +1071,40 @@ gen_static_fun_dest(Node, MFA) ->
 broadcast_to_nodes(Nodes, Msg) ->
     lists:foreach(fun(Node) -> erlang:send({?MODULE, Node}, Msg) end, Nodes).
 
-% Tell erlroute on a node we exist. Dropped silently if it isn't running there.
+% Bare discovery ping: "I'm an erlroute node, sync with me". Carries no payload
+% and does not by itself create any state on the receiver beyond prompting it to
+% sync. Dropped silently where erlroute isn't running.
+-spec ping_node(Node :: node()) -> ok.
+
+ping_node(Node) ->
+    _ = erlang:send({?MODULE, Node}, {erlroute_ping, node()}),
+    ok.
+
+-spec ping_nodes(Nodes :: [node()]) -> ok.
+
+ping_nodes(Nodes) ->
+    broadcast_to_nodes(Nodes, {erlroute_ping, node()}).
+
 -spec announce_to(Node :: node()) -> ok.
 
 announce_to(Node) ->
-    _ = erlang:send({?MODULE, Node}, {erlroute_hello, node()}),
+    _ = erlang:send({?MODULE, Node}, {erlroute_sync, node(), local_descriptors()}),
     ok.
 
--spec announce_to_nodes(Nodes :: [node()]) -> ok.
+-spec apply_remote_descriptors(Node, Descriptors) -> ok when
+    Node        :: node(),
+    Descriptors :: [{flow_source(), delivery_descriptor()}].
 
-announce_to_nodes(Nodes) ->
-    broadcast_to_nodes(Nodes, {erlroute_hello, node()}).
-
-% @doc Discrover erlang nodes which have erlroute
--spec discover_erlroute_nodes() -> Result when
-    Result  :: [node()].
-
-discover_erlroute_nodes() ->
-    case node() of
-        nonode@nohost ->
-            [];
-        _SomeNodeName ->
-            Nodes = nodes(),
-            case length(Nodes) of
-                0 ->
-                    [];
-                _NotNull ->
-                    lists:foldl(fun
-                        ({Node, {ok, true}}, Acc) ->
-                            [Node | Acc];
-                        ({_Node, {ok, false}}, Acc) ->
-                            Acc;
-                        ({_Node, _OtherResp}, Acc) ->
-                            Acc
-                        end,
-                        [],
-                        lists:zip(
-                            Nodes,
-                            erpc:multicall(
-                              Nodes,
-                              erlang,
-                              function_exported,
-                              [?MODULE, start_link, 0],
-                              ?DEFAULT_TIMEOUT_FOR_RPC
-                            )
-                        )
-                    )
-            end
-    end.
-
--spec fetch_subscribtions_from_remote_nodes(Nodes) -> Result when
-    Nodes   :: [node()],
-    Result  :: term().
-
-fetch_subscribtions_from_remote_nodes([]) -> false;
-fetch_subscribtions_from_remote_nodes(Nodes) ->
-    lists:foreach(fun
-        ({_Node, {ok, []}}) ->
-            false;
-        ({Node, {ok, Descriptors}}) when is_list(Descriptors) ->
-            lists:foreach(fun({#flow_source{} = FlowSource, Descriptor}) ->
-                _ = remove_remote_routes(FlowSource, Node),
-                case Descriptor of
-                    {direct, Proc, Method} ->
-                        subscribe(FlowSource, {process_on_other_node, {Node, Proc}, Method});
-                    {pool, RouterPid} ->
-                        subscribe(FlowSource, {erlroute_on_other_node, {Node, RouterPid}, pub_type_based})
-                end
-            end, Descriptors);
-        ({_Node, _OtherResp}) ->
-            false
-        end,
-        lists:zip(
-            Nodes,
-            erpc:multicall(
-              Nodes,
-              erlroute,
-              fetch_flow_dests_and_sources,
-              [],
-              ?DEFAULT_TIMEOUT_FOR_RPC
-            )
-        )
-    ).
+apply_remote_descriptors(Node, Descriptors) ->
+    lists:foreach(fun({#flow_source{} = FlowSource, Descriptor}) ->
+        _ = remove_remote_routes(FlowSource, Node),
+        case Descriptor of
+            {direct, Proc, Method} ->
+                subscribe(FlowSource, {process_on_other_node, {Node, Proc}, Method});
+            {pool, RouterPid} ->
+                subscribe(FlowSource, {erlroute_on_other_node, {Node, RouterPid}, pub_type_based})
+        end
+    end, Descriptors).
 
 -spec unsubscribe_node(Node) -> Result when
     Node    :: node(),
@@ -1180,12 +1141,9 @@ erlroute_cache_etses() ->
         ets:all()
     ).
 
--spec fetch_flow_dests_and_sources() -> Result when
-    Result      :: [{flow_source(), delivery_descriptor()}].
+-spec local_descriptors() -> [{flow_source(), delivery_descriptor()}].
 
-% Our local subscriptions as one delivery_descriptor/2 per (topic, module), for
-% a (re)joining node to rebuild routes back to us. Remote-held routes excluded.
-fetch_flow_dests_and_sources() ->
+local_descriptors() ->
     Groups = lists:foldl(fun
         (#subscriber{dest_type = DestType, topic = Topic, module = Module, dest = Dest, method = Method}, Acc)
           when DestType =:= process; DestType =:= poolboy; DestType =:= function ->
@@ -1223,7 +1181,7 @@ delivery_descriptor(Topic, Module) ->
 
 % The single source of truth for the direct-vs-pool decision, shared by the live
 % subscribe path (delivery_descriptor/2) and the join-time pull path
-% (fetch_flow_dests_and_sources/0): one lone process subscriber -> direct send;
+% (local_descriptors/0): one lone process subscriber -> direct send;
 % anything else (2+, or a non-process subscriber) -> via the assigned router.
 -spec descriptor_from_subscribers(Subs, Topic) -> delivery_descriptor() when
     Subs    :: [{dest_type(), dest(), delivery_method()}],
