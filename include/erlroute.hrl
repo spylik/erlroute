@@ -13,8 +13,9 @@
 -record(erlroute_state, {
         erlroute_nodes = []     :: [node()],
         monitors = #{}          :: #{pid() => reference()},
-        % last-known pid per router index, for rebind-on-restart detection
-        router_pool = #{}       :: #{pos_integer() => pid()}
+        % the router pool, spawn_linked from erlroute's init; a router crash
+        % takes erlroute down with it (routers are not supposed to crash).
+        routers = []            :: [pid()]
     }).
 
 -type matchspec()           :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
@@ -22,13 +23,10 @@
 -type erlroute_state()          :: #erlroute_state{}.
 
 -type pub_type()                :: 'sync' | 'async' | 'hybrid'.
-% dispatch scope: 'all' routes to local + cross-node destinations; 'local' skips
-% cross-node routes (used when a router fans out an inbound remote publish, so it
-% doesn't re-forward to other nodes).
 -type scope()                   :: 'all' | 'local'.
 -type topic()                   :: binary().
 -type proc()                    :: pid() | atom().
--type other_node_dest()         :: node() | {node(), proc()}.
+-type other_node_dest()         :: node() | {node(), proc()} | {node(), pos_integer()}.
 -type payload()                 :: term().
 
 
@@ -85,18 +83,15 @@
         topic = <<"#">>         :: topic()
     }).
 
-% How remote nodes deliver a (topic, module) back to us. direct: a lone process
-% subscriber, sent to straight (one hop, no local pub). pool: 2+ subscribers or
-% any non-process one, sent once to our router which fans out locally.
 -type delivery_descriptor()     :: 'none'
                                 |  {'direct', proc(), proc_delivery_method()}
-                                |  {'pool', pid()}.
+                                |  {'pool', pos_integer()}.
 
 -type flow_source()             :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
 -type flow_dest()               :: {process, proc(), proc_delivery_method()}
                                 |  {poolboy, atom(), proc_delivery_method()}
                                 |  {function, fun_dest(), function_delivery_method()}
-                                |  {erlroute_on_other_node, {node(), pid()} | node(), pub_type_based}
+                                |  {erlroute_on_other_node, {node(), pos_integer()} | node(), pub_type_based}
                                 |  {process_on_other_node, {node(), proc()}, proc_delivery_method()}.
 
 

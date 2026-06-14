@@ -27,15 +27,8 @@ init([]) ->
         10                                     % Timeout (need read and test more about timeout strategy)
     },
 
-    RouterSup = {
-        erlroute_router_sup,
-        {erlroute_router_sup, start_link, []},
-        permanent,
-        infinity,
-        supervisor,
-        [erlroute_router_sup]
-    },
-
+    % erlroute owns its router pool directly (spawn_link in its init), so the
+    % pool lives and dies with erlroute — no separate supervisor.
     Erlroute = {
         erlroute,                              % ID
         {erlroute, start_link, []},            % Start
@@ -45,5 +38,5 @@ init([]) ->
         [erlroute]                             % Option lists the modules that this process depends on
     },
 
-    Childrens = [RouterSup, Erlroute],
+    Childrens = [Erlroute],
     {ok, {RestartStrategy, Childrens}}.

@@ -1092,28 +1092,26 @@ router_pool_test_() ->
         fun cleanup/1,
         {inorder,
             [
-                {<<"router pool starts at default size (10) under erlroute_router_sup">>,
+                {<<"router pool starts at default size (10), each registered">>,
                     fun() ->
-                        Children = supervisor:which_children(erlroute_router_sup),
-                        ?assertEqual(10, length(Children)),
                         ?assertEqual(10, erlroute:router_pool_size()),
-                        lists:foreach(fun({Index, Pid, worker, _Mods}) ->
-                            ?assert(is_pid(Pid)),
-                            ?assertEqual(Pid, whereis(erlroute:router_name(Index)))
-                        end, Children)
+                        lists:foreach(fun(Index) ->
+                            ?assert(is_pid(whereis(erlroute:router_name(Index))))
+                        end, lists:seq(1, 10)),
+                        %% one past the pool must not be registered
+                        ?assertEqual(undefined, whereis(erlroute:router_name(11)))
                     end},
-                {<<"assign_router is stable per topic and returns a pool member">>,
+                {<<"router_index is stable per topic and maps to a registered router">>,
                     fun() ->
-                        PoolPids = [Pid || {_I, Pid, _T, _M} <- supervisor:which_children(erlroute_router_sup)],
                         Topic = <<"alpha.topic">>,
-                        Pid = erlroute:assign_router(Topic),
-                        ?assert(is_pid(Pid)),
-                        ?assertEqual(Pid, erlroute:assign_router(Topic)),
-                        ?assert(lists:member(Pid, PoolPids))
+                        Index = erlroute:router_index(Topic),
+                        ?assert(is_integer(Index) andalso Index >= 1 andalso Index =< 10),
+                        ?assertEqual(Index, erlroute:router_index(Topic)),
+                        ?assert(is_pid(whereis(erlroute:router_name(Index))))
                     end},
                 {<<"topics spread across more than one router">>,
                     fun() ->
-                        Assigned = [erlroute:assign_router(integer_to_binary(N)) || N <- lists:seq(1, 200)],
+                        Assigned = [erlroute:router_index(integer_to_binary(N)) || N <- lists:seq(1, 200)],
                         ?assert(length(lists:usort(Assigned)) > 1)
                     end}
             ]
@@ -1295,7 +1293,7 @@ run_remote_pub_variant_process_cast(PeerNode) ->
     end.
 
 %% Send a hand-crafted remote_pub envelope to the peer's *assigned* router for
-%% the topic (resolved via the peer's own assign_router), and verify that pool
+%% the topic (resolved via the peer's own router_index), and verify that pool
 %% member dispatches it to a local subscriber on the peer.
 assert_assigned_router_dispatches_envelope(PeerNode) ->
     Topic   = <<"erlroute.crossnode.remote_pub.async_envelope">>,
@@ -1317,11 +1315,11 @@ assert_assigned_router_dispatches_envelope(PeerNode) ->
         erlang:error(envelope_subscribed_timeout)
     end,
 
-    RouterPid = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
-    ?assert(is_pid(RouterPid)),
+    Index = rpc:call(PeerNode, erlroute, router_index, [Topic]),
+    ?assert(is_integer(Index)),
 
     EtsName = erlroute:cache_table(?MODULE),
-    erlang:send(RouterPid,
+    erlang:send({erlroute:router_name(Index), PeerNode},
                 {remote_pub, ?MODULE, self(), ?LINE, Topic, Payload, async, EtsName}),
 
     receive
@@ -1333,7 +1331,7 @@ assert_assigned_router_dispatches_envelope(PeerNode) ->
 
 %% End-to-end pool path: a function subscriber on the peer becomes an
 %% erlroute_on_other_node route on the publisher, addressed by the peer's
-%% assigned router pid. Publishing locally must reach the peer's function via
+%% assigned router index. Publishing locally must reach the peer's function via
 %% that router.
 run_remote_pub_variant_function(PeerNode) ->
     Topic   = <<"erlroute.crossnode.remote_pub.function">>,
@@ -1358,12 +1356,12 @@ run_remote_pub_variant_function(PeerNode) ->
     _ = sys:get_state(erlroute),
 
     %% Publisher-side route must be erlroute_on_other_node addressed by the
-    %% peer's assigned router pid for this topic.
-    ExpectedRouter = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
-    ?assert(is_pid(ExpectedRouter)),
+    %% peer's assigned router index for this topic.
+    ExpectedIndex = rpc:call(PeerNode, erlroute, router_index, [Topic]),
+    ?assert(is_integer(ExpectedIndex)),
     RouteMS = [{#subscriber{topic = Topic,
                             dest_type = erlroute_on_other_node,
-                            dest = {PeerNode, ExpectedRouter},
+                            dest = {PeerNode, ExpectedIndex},
                             _ = '_'},
                 [], [true]}],
     ?assertEqual(1, ets:select_count('$erlroute_subscribers', RouteMS)),
@@ -1468,106 +1466,6 @@ assert_peer_got_once(Tag, Payload) ->
             ?assertEqual(no_extra, Extra)
     after 5000 ->
         ?assertEqual({peer_got, Tag, Payload}, timeout)
-    end.
-
-%% =============================================================
-%% Router restart rebind: when a peer's router crashes and is
-%% restarted with a new pid, the publisher node must repoint its
-%% erlroute_on_other_node routes from the dead pid to the new one,
-%% and keep delivering. Skipped unless distributed.
-%% =============================================================
-cross_node_router_rebind_test_() ->
-    {timeout, 60, fun() ->
-        case is_alive() of
-            false -> ok;
-            true  -> do_cross_node_router_rebind()
-        end
-    end}.
-
-do_cross_node_router_rebind() ->
-    {ok, _} = application:ensure_all_started(erlroute),
-    [_, Host] = string:split(atom_to_list(node()), "@"),
-    PeerName = list_to_atom("erlroute_rebind_peer_" ++ integer_to_list(erlang:unique_integer([positive]))),
-    {ok, Peer, PeerNode} = peer:start_link(#{name => PeerName, host => Host}),
-    true = rpc:call(PeerNode, code, set_path, [code:get_path()]),
-    {ok, _} = rpc:call(PeerNode, application, ensure_all_started, [erlroute]),
-
-    Cleanup = fun() ->
-        catch peer:stop(Peer),
-        application:stop(erlroute)
-    end,
-
-    Topic   = <<"erlroute.crossnode.rebind.topic">>,
-    Payload = {after_rebind, erlang:unique_integer([positive])},
-    Self    = self(),
-
-    Forwarder = spawn(PeerNode,
-        fun() ->
-            erlroute:sub(Topic, fun(P) -> Self ! {rebind_fired, P} end),
-            Self ! rebind_subscribed,
-            receive _ -> ok after 30000 -> ok end
-        end),
-
-    try
-        receive rebind_subscribed -> ok
-        after 3000 -> erlang:error(rebind_subscribe_timeout)
-        end,
-        _ = sys:get_state(erlroute),
-
-        OldRouter = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
-        ?assert(is_pid(OldRouter)),
-        ?assertEqual({PeerNode, OldRouter}, remote_router_route(Topic)),
-
-        %% Crash the assigned router on the peer; its supervisor restarts it
-        %% with a fresh pid, which announces itself and triggers the rebind.
-        true = rpc:call(PeerNode, erlang, exit, [OldRouter, kill]),
-
-        NewRouter = wait_router_changed(PeerNode, Topic, OldRouter, 50),
-        ?assert(is_pid(NewRouter)),
-        ?assertNotEqual(OldRouter, NewRouter),
-
-        ok = wait_route_rebound(Topic, {PeerNode, NewRouter}, 50),
-
-        EtsName = erlroute:cache_table(?MODULE),
-        erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
-        receive
-            {rebind_fired, Payload} -> ok
-        after 5000 ->
-            ?assertEqual({rebind_fired, Payload}, timeout)
-        end
-    catch
-        Class:Reason:ST ->
-            catch exit(Forwarder, kill),
-            Cleanup(),
-            erlang:raise(Class, Reason, ST)
-    end,
-    Cleanup(),
-    ok.
-
-%% Read the (single) erlroute_on_other_node route dest for a topic.
-remote_router_route(Topic) ->
-    case ets:select('$erlroute_subscribers',
-            [{#subscriber{topic = Topic, dest_type = erlroute_on_other_node, dest = '$1', _ = '_'},
-              [], ['$1']}]) of
-        [Dest] -> Dest;
-        []     -> undefined;
-        Many   -> Many
-    end.
-
-wait_router_changed(_PeerNode, _Topic, _Old, 0) ->
-    erlang:error(router_did_not_restart);
-wait_router_changed(PeerNode, Topic, Old, N) ->
-    case rpc:call(PeerNode, erlroute, assign_router, [Topic]) of
-        New when is_pid(New), New =/= Old -> New;
-        _ -> timer:sleep(100), wait_router_changed(PeerNode, Topic, Old, N - 1)
-    end.
-
-wait_route_rebound(_Topic, _Expected, 0) ->
-    erlang:error(route_not_rebound);
-wait_route_rebound(Topic, Expected, N) ->
-    case remote_router_route(Topic) of
-        Expected -> ok;
-        _ -> timer:sleep(100), wait_route_rebound(Topic, Expected, N - 1)
     end.
 
 %% =============================================================

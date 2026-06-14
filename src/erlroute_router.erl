@@ -2,8 +2,10 @@
 %% File:    erlroute_router.erl
 %% @author  Oleksii Semilietov <spylik@gmail.com>
 %%
-%% One member of the cross-node publish dispatch pool. Plain receive loop owned
-%% by erlroute_router_sup; addressed cross-node by raw pid (see erlroute:assign_router/1).
+%% One member of the cross-node publish dispatch pool. Plain receive loop,
+%% spawn_linked directly from erlroute (no supervisor); addressed cross-node by
+%% its registered name erlroute_router_<Index> (see erlroute:router_index/1,
+%% erlroute:router_name/1).
 %% --------------------------------------------------------------------------------
 
 -module(erlroute_router).
@@ -26,20 +28,12 @@ start_link(Index) ->
 -spec init(Parent :: pid(), Index :: pos_integer()) -> no_return().
 
 init(Parent, Index) ->
+    %% Registering under erlroute_router_<Index> is what makes restarts
+    %% self-healing: publishers address us by {router_name(Index), Node}, so a
+    %% restarted process re-registers the name and delivery resumes — no rebind.
     true = register(erlroute:router_name(Index), self()),
     proc_lib:init_ack(Parent, {ok, self()}),
-    _ = announce(Index),
     loop().
-
-% erlroute pulls the pool in its own init, so a missed announce at boot (erlroute
-% not up yet) is harmless; on a restart it lets erlroute rebind remote routes.
--spec announce(Index :: pos_integer()) -> ok | {router_up, pos_integer(), pid()}.
-
-announce(Index) ->
-    case whereis(erlroute) of
-        undefined -> ok;
-        Erlroute  -> Erlroute ! {router_up, Index, self()}
-    end.
 
 -spec loop() -> no_return().
 
