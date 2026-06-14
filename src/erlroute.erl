@@ -82,6 +82,9 @@ stop(async) ->
 -spec init([]) -> {ok, erlroute_state()}.
 
 init([]) ->
+    %% Trap exits so a router death arrives as a message (we stop on it) and so
+    %% terminate/2 runs on every controlled stop to tear the pool down cleanly.
+    process_flag(trap_exit, true),
     _ = ets:new('$erlroute_topics', [
             bag,
             public, % public for support full sync pub
@@ -96,21 +99,13 @@ init([]) ->
             {keypos, #subscriber.topic},
             named_table
         ]),
-    %% Start the router pool, linked, before serving anyone — publishers reach
-    %% routers by registered name, so they must be up first. spawn_link (not a
-    %% supervisor): a router crash, which should never happen, takes erlroute
-    %% down with it; erlroute_sup then restarts the whole thing.
     Routers = start_routers(router_pool_size()),
     _ = net_kernel:monitor_nodes(true),
     Nodes = discover_erlroute_nodes(),
     _ = fetch_subscribtions_from_remote_nodes(Nodes),
-    %% Announce ourselves to everyone we're already connected to, so erlroute
-    %% nodes that were up before us (and whose own nodeup for us fired before
-    %% our erlroute was loaded) learn about us too. See handle_info(erlroute_hello).
     _ = announce_to_nodes(nodes()),
     {ok, #erlroute_state{erlroute_nodes = Nodes, routers = Routers}}.
 
-% Spawn the linked router pool (indexes 1..N), each registering erlroute_router_<I>.
 -spec start_routers(N :: pos_integer()) -> [pid()].
 
 start_routers(N) ->
@@ -176,14 +171,12 @@ handle_cast(Msg, State) ->
                  | {nodedown, node()}
                  | {erlroute_hello, node()}
                  | {set_remote_route, flow_source(), delivery_descriptor(), node()}
-                 | {remove_remote_route, flow_source(), node()},
+                 | {remove_remote_route, flow_source(), node()}
+                 | {'DOWN', reference(), process, pid(), term()}
+                 | {'EXIT', pid(), term()},
     State       :: erlroute_state(),
     Result      :: {noreply, erlroute_state()}.
 
-% A node connected. Say hello; if it runs erlroute it adds us and hellos back,
-% which is where we learn it (handle_info(erlroute_hello)). Non-erlroute nodes
-% drop the hello. This replaces a one-shot erpc check that raced a peer whose
-% erlroute hadn't loaded yet, leaving discovery permanently asymmetric.
 handle_info({nodeup, Node}, State) ->
     _ = case Node =/= node() of
         true  -> announce_to(Node);
@@ -191,15 +184,10 @@ handle_info({nodeup, Node}, State) ->
     end,
     {noreply, State};
 
-% todo: unsubscribe that node after some timeout
 handle_info({nodedown, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
     _ = unsubscribe_node(Node),
     {noreply, State#erlroute_state{erlroute_nodes = Nodes -- [Node]}};
 
-% A peer announced itself. If it's new, learn it, pull its subscriptions, and
-% hello back so it learns us — symmetric even if both started at once or one's
-% nodeup fired too early. Already-known peers are ignored, so the handshake
-% settles in a couple of messages.
 handle_info({erlroute_hello, Node}, #erlroute_state{erlroute_nodes = Nodes} = State) ->
     case Node =:= node() orelse lists:member(Node, Nodes) of
         true ->
@@ -210,8 +198,6 @@ handle_info({erlroute_hello, Node}, #erlroute_state{erlroute_nodes = Nodes} = St
             {noreply, State#erlroute_state{erlroute_nodes = [Node | Nodes]}}
     end;
 
-% Replace whatever route we held for Node with the descriptor it sent, keeping
-% exactly one route per (topic, module, node) — see delivery_descriptor/2.
 handle_info({set_remote_route, FlowSource, Descriptor, Node}, State) ->
     _ = remove_remote_routes(FlowSource, Node),
     _ = case Descriptor of
@@ -230,6 +216,13 @@ handle_info({'DOWN', _Ref, process, Pid, _Reason}, #erlroute_state{monitors = Mo
     _ = unsubscribe_local_pid(Pid, ErlRouteNodes),
     {noreply, State#erlroute_state{monitors = maps:remove(Pid, Monitors)}};
 
+% One of router died — which is not supposed to happen. Take erlroute down with it
+handle_info({'EXIT', Pid, Reason}, #erlroute_state{routers = Routers} = State) ->
+    case lists:member(Pid, Routers) of
+        true  -> {stop, {router_died, Pid, Reason}, State};
+        false -> {noreply, State}
+    end;
+
 % @doc case for unknown messages
 handle_info(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle_info with message ~p\n",[Msg]),
@@ -241,13 +234,19 @@ handle_info(Msg, State) ->
     Reason      :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
     State       :: erlroute_state().
 
-% On a controlled stop (e.g. gen_server:stop, reason 'normal') the link to a
-% router does NOT take it down — a normal exit isn't propagated — so tear the
-% pool down explicitly to avoid orphaning routers and leaking their registered
-% names. (An abnormal erlroute exit already kills them via the link.)
 terminate(_Reason, #erlroute_state{routers = Routers}) ->
-    _ = [begin unlink(Pid), exit(Pid, kill) end || Pid <- Routers],
+    _ = stop_routers(Routers),
     ok.
+
+-spec stop_routers(Routers :: [pid()]) -> ok.
+
+stop_routers(Routers) ->
+    lists:foreach(fun(Pid) ->
+        unlink(Pid),
+        MRef = erlang:monitor(process, Pid),
+        exit(Pid, kill),
+        receive {'DOWN', MRef, process, Pid, _} -> ok after 1000 -> ok end
+    end, Routers).
 
 -spec code_change(OldVsn, State, Extra) -> Result when
     OldVsn      :: Vsn | {down, Vsn},
