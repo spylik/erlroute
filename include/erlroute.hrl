@@ -22,6 +22,10 @@
 -type erlroute_state()          :: #erlroute_state{}.
 
 -type pub_type()                :: 'sync' | 'async' | 'hybrid'.
+% dispatch scope: 'all' routes to local + cross-node destinations; 'local' skips
+% cross-node routes (used when a router fans out an inbound remote publish, so it
+% doesn't re-forward to other nodes).
+-type scope()                   :: 'all' | 'local'.
 -type topic()                   :: binary().
 -type proc()                    :: pid() | atom().
 -type other_node_dest()         :: node() | {node(), proc()}.

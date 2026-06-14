@@ -36,6 +36,7 @@
         pub/2,  % translate to pub/7
         pub/5,  % translate to pub/7
         pub/7,
+        pub_local/6,  % local-only dispatch entry point for erlroute_router
         full_async_pub/5,
         full_sync_pub/5,
         sub/2,
@@ -43,7 +44,7 @@
         unsub/2,
         unsub/1,
         cache_table/1, % export support function for parse_transform
-        post_hitcache_routine/9,
+        post_hitcache_routine/10,
         gen_static_fun_dest/2,
         fetch_flow_dests_and_sources/0,
         erlroute_cache_etses/0,
@@ -372,10 +373,11 @@ pub(Module, Process, Line, Topic, Payload, hybrid = PubType, EtsName) ->
         PubType,
         Topic,
         Payload,
-        []
+        [],
+        all
     ),
     PostRef = gen_id(),
-    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetWhileSync, PostRef]),
+    spawn(?MODULE, post_hitcache_routine, [Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetWhileSync, PostRef, all]),
     WhoGetWhileSync;
 
 pub(Module, Process, Line, Topic, Payload, async, EtsName) ->
@@ -400,12 +402,51 @@ pub(Module, Process, Line, Topic, Payload, sync = PubType, EtsName) ->
             PubType,
             Topic,
             Payload,
-            []
+            [],
+            all
         ),
-        undefined
+        undefined,
+        all
     ).
 
--spec load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Payload, Acc) -> Result when
+% @doc Local-only sync dispatch: deliver to this node's subscribers but never
+% re-forward to cross-node routes. Used by erlroute_router when fanning out an
+% inbound remote publish — the originating node already reached every node.
+-spec pub_local(Module, Process, Line, Topic, Payload, EtsName) -> Result when
+    Module  ::  module(),
+    Process ::  proc(),
+    Line    ::  pos_integer(),
+    Topic   ::  topic(),
+    Payload ::  payload(),
+    EtsName ::  atom(),
+    Result  ::  pub_result().
+
+pub_local(Module, Process, Line, Topic, Payload, EtsName) ->
+    post_hitcache_routine(
+        Module,
+        Process,
+        Line,
+        sync,
+        Topic,
+        Payload,
+        EtsName,
+        load_routing_and_send(
+            ets:whereis(EtsName),
+            EtsName,
+            Module,
+            Process,
+            Line,
+            sync,
+            Topic,
+            Payload,
+            [],
+            local
+        ),
+        undefined,
+        local
+    ).
+
+-spec load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Payload, Acc, Scope) -> Result when
     EtsTid          :: undefined | ets:tid(),
     EtsName         :: atom(),
     Module          :: module(),
@@ -415,26 +456,27 @@ pub(Module, Process, Line, Topic, Payload, sync = PubType, EtsName) ->
     Topic           :: topic(),
     Payload         :: payload(),
     Acc             :: pub_result(),
+    Scope           :: scope(),
     Result          :: pub_result().
 
-load_routing_and_send(undefined, _EtsName, _Module, _Process, _Line, _PubType, _Topic, _Payload, Acc) -> Acc;
-load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Payload, Acc) ->
+load_routing_and_send(undefined, _EtsName, _Module, _Process, _Line, _PubType, _Topic, _Payload, Acc, _Scope) -> Acc;
+load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Payload, Acc, Scope) ->
     try ets:lookup(EtsTid, Topic) of
         [] when Topic =/= <<"#">> ->
-            load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, <<"#">>, Payload, Acc);
+            load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, <<"#">>, Payload, Acc, Scope);
         [] ->
             Acc;
         Routes when Topic =/= <<"#">> ->
             % send to wildcard-topic subscribers
-            load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, <<"#">>, Payload, send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc));
+            load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, <<"#">>, Payload, send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope), Scope);
         Routes ->
-            send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc)
+            send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope)
     catch
         _:_ ->
             Acc
     end.
 
--spec send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) -> Result when
+-spec send(Routes, Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) -> Result when
     Routes          :: [cached_route()],
     Payload         :: payload(),
     Module          :: module(),
@@ -444,10 +486,11 @@ load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Pa
     Topic           :: topic(),
     EtsName         :: atom(),
     Acc             :: pub_result(),
+    Scope           :: scope(),
     Result          :: pub_result().
 
 % sending to standart process
-send([#cached_route{dest_type = 'process', method = Method, dest = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
+send([#cached_route{dest_type = 'process', method = Method, dest = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) ->
     case Method of
         info -> Dest ! Payload;
         cast -> gen_server:cast(Dest, Payload);
@@ -463,10 +506,10 @@ send([#cached_route{dest_type = 'process', method = Method, dest = Dest}|T], Pay
 			end
 
     end,
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc], Scope);
 
 % apply process
-send([#cached_route{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
+send([#cached_route{dest_type = 'function', method = Method, dest = {Function, ShellIncludeTopic} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) ->
     try
         case Method of
             cast ->
@@ -523,10 +566,10 @@ send([#cached_route{dest_type = 'function', method = Method, dest = {Function, S
                 [Payload, Function, Topic, Error, Reason]
             )
     end,
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc], Scope);
 
 % sending to poolboy pool
-send([#cached_route{dest_type = 'poolboy', method = Method, dest = PoolName}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
+send([#cached_route{dest_type = 'poolboy', method = Method, dest = PoolName}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) ->
     _ = try
         Worker = poolboy:checkout(PoolName),
         case Method of
@@ -538,34 +581,34 @@ send([#cached_route{dest_type = 'poolboy', method = Method, dest = PoolName}|T],
     catch
         X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
     end,
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{PoolName, Method} | Acc]);
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{PoolName, Method} | Acc], Scope);
 
-% Cross-node routes. Under local-only dispatch (a router fanning out an inbound
-% remote_pub, see erlroute_router) these are skipped: the originating publisher
-% already reached every node, so re-forwarding would just duplicate / loop. The
-% route is still marked in Acc so post_hitcache won't resend it.
-send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_pid(Proc) ->
-    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send(Proc, Payload),
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
+% Cross-node routes. With Scope =:= local (a router fanning out an inbound
+% remote_pub) the actual send is skipped: the originating node already reached
+% every node, so re-forwarding would just duplicate / loop. The route is still
+% marked in Acc so post_hitcache won't resend it.
+send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) when is_pid(Proc) ->
+    _ = Scope =:= local orelse erlang:send(Proc, Payload),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc], Scope);
 
-send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_atom(Proc) ->
-    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send({Proc, Node}, Payload),
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc]);
+send([#cached_route{dest_type = 'process_on_other_node', method = info, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) when is_atom(Proc) ->
+    _ = Scope =:= local orelse erlang:send({Proc, Node}, Payload),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, info} | Acc], Scope);
 
-send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_pid(Proc) ->
-    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send(Proc, {'$gen_cast', Payload}),
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
+send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) when is_pid(Proc) ->
+    _ = Scope =:= local orelse erlang:send(Proc, {'$gen_cast', Payload}),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc], Scope);
 
-send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) when is_atom(Proc) ->
-    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send({Proc, Node}, {'$gen_cast', Payload}),
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc]);
+send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) when is_atom(Proc) ->
+    _ = Scope =:= local orelse erlang:send({Proc, Node}, {'$gen_cast', Payload}),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc], Scope);
 
-send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = {_Node, RouterPid} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc) ->
-    _ = get('$erlroute_local_dispatch') =:= true orelse erlang:send(RouterPid, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc]);
+send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = {_Node, RouterPid} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) ->
+    _ = Scope =:= local orelse erlang:send(RouterPid, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc], Scope);
 
 % final clause for empty list
-send([], _Payload, _Module, _Process, _Line, _PubType, _Topic, _EtsName, Acc) -> Acc.
+send([], _Payload, _Module, _Process, _Line, _PubType, _Topic, _EtsName, Acc, _Scope) -> Acc.
 
 % ================================ end of pub part =============================
 % ----------------------------------- sub part ---------------------------------
@@ -790,18 +833,17 @@ delete_local_subscriber(#flow_source{module = Module, topic = Topic}, {DestType,
     end, CacheEtsSes),
     ok.
 
-% Remove all local process subscriptions for a pid; returns the {Topic, Module}s touched.
--spec delete_local_process(Pid) -> [{topic(), module()}] when
+% Remove all local process subscriptions for a pid (the caller has already
+% captured the affected (topic, module) pairs it needs).
+-spec delete_local_process(Pid) -> ok when
     Pid :: pid().
 
 delete_local_process(Pid) ->
-    Affected = lists:usort(ets:select(?SUBETS,
-        [{#subscriber{dest_type = process, dest = Pid, topic = '$1', module = '$2', _ = '_'}, [], [{{'$1', '$2'}}]}])),
     ets:match_delete(?SUBETS, #subscriber{dest_type = process, dest = Pid, _ = '_'}),
     lists:foreach(fun(CacheEtsName) ->
         ets:match_delete(CacheEtsName, #cached_route{dest_type = process, dest = Pid, _ = '_'})
     end, erlroute_cache_etses()),
-    Affected.
+    ok.
 
 % A monitored subscriber died: drop its subscriptions and re-propagate descriptors.
 -spec unsubscribe_local_pid(Pid, ErlRouteNodes) -> ok when
@@ -844,7 +886,7 @@ remove_remote_routes(#flow_source{module = Module, topic = Topic}, Node) ->
 
 % ---------------------------------other functions -----------------------------
 
--spec post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetAlready, PostRef) -> Result when
+-spec post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetAlready, PostRef, Scope) -> Result when
     Module          :: module(),
     Process         :: pid(),
     Line            :: pos_integer(),
@@ -854,9 +896,10 @@ remove_remote_routes(#flow_source{module = Module, topic = Topic}, Node) ->
     EtsName         :: atom(),
     WhoGetAlready   :: pub_result(),
     PostRef         :: undefined | reference(),
+    Scope           :: scope(),
     Result          :: term(). % todo
 
-post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetAlready, PostRef) ->
+post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, WhoGetAlready, PostRef, Scope) ->
     Words = split_topic(Topic),
     ProcessToWrite =
         try
@@ -897,7 +940,7 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
                         method = Method,
                         parent_topic = {?SUBETS, Topic}
                     },
-                    Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, []),
+                    Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, [], Scope),
                     ets:insert(route_table_must_present(EtsName), ToInsert),
                     Toreturn;
                 _NoMatch ->

@@ -28,12 +28,6 @@ start_link(Index) ->
 init(Parent, Index) ->
     true = register(erlroute:router_name(Index), self()),
     proc_lib:init_ack(Parent, {ok, self()}),
-    %% We only ever dispatch inbound remote publishes — deliver to local
-    %% subscribers, never re-forward across nodes (the origin already reached
-    %% every node). erlroute:send/9 reads this flag; see its on_other_node
-    %% clauses. Forcing `sync' below keeps the whole fan-out in this process so
-    %% the flag is in scope throughout.
-    put('$erlroute_local_dispatch', true),
     _ = announce(Index),
     loop().
 
@@ -52,8 +46,9 @@ announce(Index) ->
 loop() ->
     receive
         {remote_pub, Module, Process, Line, Topic, Payload, _PubType, EtsName} ->
+            %% local-only: deliver to this node's subscribers, never re-forward
             _ = try
-                erlroute:pub(Module, Process, Line, Topic, Payload, sync, EtsName)
+                erlroute:pub_local(Module, Process, Line, Topic, Payload, EtsName)
             catch
                 Class:Reason:St ->
                     error_logger:error_msg(
