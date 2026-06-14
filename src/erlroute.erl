@@ -391,30 +391,8 @@ pub(Module, Process, Line, Topic, Payload, async, EtsName) ->
     spawn(?MODULE, pub, [Module, Process, Line, Topic, Payload, sync, EtsName]),
     [];
 
-pub(Module, Process, Line, Topic, Payload, sync = PubType, EtsName) ->
-    post_hitcache_routine(
-        Module,
-        Process,
-        Line,
-        PubType,
-        Topic,
-        Payload,
-        EtsName,
-        load_routing_and_send(
-            ets:whereis(EtsName),
-            EtsName,
-            Module,
-            Process,
-            Line,
-            PubType,
-            Topic,
-            Payload,
-            [],
-            all
-        ),
-        undefined,
-        all
-    ).
+pub(Module, Process, Line, Topic, Payload, sync, EtsName) ->
+    do_sync_pub(Module, Process, Line, Topic, Payload, EtsName, all).
 
 % @doc Local-only sync dispatch: deliver to this node's subscribers but never
 % re-forward to cross-node routes. Used by erlroute_router when fanning out an
@@ -429,6 +407,23 @@ pub(Module, Process, Line, Topic, Payload, sync = PubType, EtsName) ->
     Result  ::  pub_result().
 
 pub_local(Module, Process, Line, Topic, Payload, EtsName) ->
+    do_sync_pub(Module, Process, Line, Topic, Payload, EtsName, local).
+
+% Sync publish: cache-hit dispatch (load_routing_and_send) then lazy match +
+% cache populate (post_hitcache_routine). Scope = all routes to local AND
+% cross-node destinations; local skips the cross-node ones (a router fanning out
+% an inbound remote_pub).
+-spec do_sync_pub(Module, Process, Line, Topic, Payload, EtsName, Scope) -> Result when
+    Module  ::  module(),
+    Process ::  proc(),
+    Line    ::  pos_integer(),
+    Topic   ::  topic(),
+    Payload ::  payload(),
+    EtsName ::  atom(),
+    Scope   ::  scope(),
+    Result  ::  pub_result().
+
+do_sync_pub(Module, Process, Line, Topic, Payload, EtsName, Scope) ->
     post_hitcache_routine(
         Module,
         Process,
@@ -447,10 +442,10 @@ pub_local(Module, Process, Line, Topic, Payload, EtsName) ->
             Topic,
             Payload,
             [],
-            local
+            Scope
         ),
         undefined,
-        local
+        Scope
     ).
 
 -spec load_routing_and_send(EtsTid, EtsName, Module, Process, Line, PubType, Topic, Payload, Acc, Scope) -> Result when
