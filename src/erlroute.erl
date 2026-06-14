@@ -98,6 +98,7 @@ init([]) ->
             named_table
         ]),
     _ = ets:new(?ROUTERETS, [set, public, named_table, {read_concurrency, true}]),
+    _ = ets:new(?REMOTETS, [set, public, named_table, {keypos, #remote_sub.key}]),
     Routers = start_routers(router_pool_size()),
     true = ets:insert(?ROUTERETS, [{'$routers', list_to_tuple(Routers)}, {'$next', 0}]),
     _ = net_kernel:monitor_nodes(true),
@@ -210,12 +211,7 @@ handle_info({erlroute_sync, Node, Descriptors}, #erlroute_state{erlroute_nodes =
     end;
 
 handle_info({set_remote_route, FlowSource, Descriptor, Node}, State) ->
-    NewFlowDest = case Descriptor of
-        {direct, Proc, Method} -> {process_on_other_node, {Node, Proc}, Method};
-        {pool, RouterPid}      -> {erlroute_on_other_node, {Node, RouterPid}, pub_type_based}
-    end,
-    _ = subscribe(FlowSource, NewFlowDest),
-    _ = remove_stale_remote_routes(FlowSource, Node, NewFlowDest),
+    _ = upsert_remote_route(FlowSource, Node, Descriptor),
     {noreply, State};
 
 handle_info({remove_remote_route, FlowSource, Node}, State) ->
@@ -652,7 +648,7 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
-        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' orelse DestType =:= 'erlroute_on_other_node' orelse DestType =:= 'process_on_other_node' ->
+        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
 % when Dest is pid() or atom
@@ -870,61 +866,48 @@ unsubscribe_local_pid(Pid, ErlRouteNodes) ->
     end, Befores),
     ok.
 
-% Remove every cross-node route (direct or pool) we hold to Node for a (topic, module).
+% Remove every cross-node route we hold to Node for a (topic, module).
 -spec remove_remote_routes(FlowSource, Node) -> ok when
     FlowSource  :: flow_source(),
     Node        :: node().
 
 remove_remote_routes(#flow_source{module = Module, topic = Topic}, Node) ->
-    ets:match_delete(?SUBETS, #subscriber{topic = Topic, module = Module, dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'}),
-    ets:match_delete(?SUBETS, #subscriber{topic = Topic, module = Module, dest_type = erlroute_on_other_node, dest = {Node, '_'}, _ = '_'}),
-    CacheEtsSes = case Module of
-        undefined  -> erlroute_cache_etses();
-        _SomeModule -> [cache_table(Module)]
-    end,
-    lists:foreach(fun(CacheEtsName) ->
-        try
-            ets:match_delete(CacheEtsName, #cached_route{topic = Topic, dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'}),
-            ets:match_delete(CacheEtsName, #cached_route{topic = Topic, dest_type = erlroute_on_other_node, dest = {Node, '_'}, _ = '_'})
-        catch
-            _:_ -> ok
-        end
-    end, CacheEtsSes),
-    ok.
+    ets:delete(?REMOTETS, {Topic, Module, Node}),
+    invalidate_remote_cache(Topic, Module, Node).
 
--spec remove_stale_remote_routes(FlowSource, Node, NewFlowDest) -> ok when
+-spec upsert_remote_route(FlowSource, Node, Descriptor) -> ok when
     FlowSource  :: flow_source(),
     Node        :: node(),
-    NewFlowDest :: flow_dest().
+    Descriptor  :: delivery_descriptor().
 
-remove_stale_remote_routes(#flow_source{module = Module, topic = Topic}, Node,
-                            {NewDestType, {Node, NewPid}, _NewMethod}) ->
-    OtherType = case NewDestType of
-        process_on_other_node  -> erlroute_on_other_node;
-        erlroute_on_other_node -> process_on_other_node
+upsert_remote_route(#flow_source{module = Module, topic = Topic}, Node, Descriptor) ->
+    {DestType, Dest, Method} = case Descriptor of
+        {direct, Proc, M} -> {process_on_other_node, {Node, Proc}, M};
+        {pool, RouterPid} -> {erlroute_on_other_node, {Node, RouterPid}, pub_type_based}
     end,
+    ets:insert(?REMOTETS, #remote_sub{
+        key      = {Topic, Module, Node},
+        dest_type = DestType,
+        dest     = Dest,
+        method   = Method,
+        sub_ref  = gen_id()
+    }),
+    invalidate_remote_cache(Topic, Module, Node).
+
+-spec invalidate_remote_cache(Topic, Module, Node) -> ok when
+    Topic   :: topic(),
+    Module  :: 'undefined' | module(),
+    Node    :: node().
+
+invalidate_remote_cache(Topic, Module, Node) ->
     CacheEtses = case Module of
         undefined   -> erlroute_cache_etses();
         _SomeModule -> [cache_table(Module)]
     end,
-    ets:match_delete(?SUBETS, #subscriber{topic = Topic, module = Module,
-        dest_type = OtherType, dest = {Node, '_'}, _ = '_'}),
-    ets:select_delete(?SUBETS, [{
-        #subscriber{topic = Topic, module = Module,
-                    dest_type = NewDestType, dest = {Node, '$1'}, _ = '_'},
-        [{'=/=', '$1', NewPid}],
-        [true]
-    }]),
     lists:foreach(fun(CacheEts) ->
         try
-            ets:match_delete(CacheEts, #cached_route{topic = Topic,
-                dest_type = OtherType, dest = {Node, '_'}, _ = '_'}),
-            ets:select_delete(CacheEts, [{
-                #cached_route{topic = Topic, dest_type = NewDestType,
-                              dest = {Node, '$1'}, _ = '_'},
-                [{'=/=', '$1', NewPid}],
-                [true]
-            }])
+            ets:match_delete(CacheEts, #cached_route{topic = Topic, dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'}),
+            ets:match_delete(CacheEts, #cached_route{topic = Topic, dest_type = erlroute_on_other_node, dest = {Node, '_'}, _ = '_'})
         catch
             _:_ -> ok
         end
@@ -995,7 +978,7 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
                 _NoMatch ->
                     Acc
             end
-        end, WhoGetAlready, ets:lookup(?SUBETS, Topic)
+        end, WhoGetAlready, ets:lookup(?SUBETS, Topic) ++ remote_subs_as_subscribers(Topic, Module)
     ).
 
 
@@ -1136,15 +1119,8 @@ announce_to(Node) ->
 apply_remote_descriptors(Node, Descriptors) ->
     lists:foreach(fun({#flow_source{} = FlowSource, Descriptor}) ->
         case Descriptor of
-            none ->
-                remove_remote_routes(FlowSource, Node);
-            _ ->
-                NewFlowDest = case Descriptor of
-                    {direct, Proc, Method} -> {process_on_other_node, {Node, Proc}, Method};
-                    {pool, RouterPid}      -> {erlroute_on_other_node, {Node, RouterPid}, pub_type_based}
-                end,
-                _ = subscribe(FlowSource, NewFlowDest),
-                _ = remove_stale_remote_routes(FlowSource, Node, NewFlowDest)
+            none -> remove_remote_routes(FlowSource, Node);
+            _    -> upsert_remote_route(FlowSource, Node, Descriptor)
         end
     end, Descriptors).
 
@@ -1153,8 +1129,7 @@ apply_remote_descriptors(Node, Descriptors) ->
     Result  :: term(). % todo
 
 unsubscribe_node(Node) ->
-    ets:match_delete(?SUBETS, #subscriber{dest_type = erlroute_on_other_node, dest = {Node, '_'}, _ = '_'}),
-    ets:match_delete(?SUBETS, #subscriber{dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'}),
+    ets:match_delete(?REMOTETS, #remote_sub{key = {'_', '_', Node}, _ = '_'}),
     lists:foreach(fun(CacheEtsName) ->
         ets:match_delete(CacheEtsName, #cached_route{dest_type = erlroute_on_other_node, dest = {Node, '_'}, _ = '_'}),
         ets:match_delete(CacheEtsName, #cached_route{dest_type = process_on_other_node, dest = {Node, '_'}, _ = '_'})
@@ -1290,6 +1265,26 @@ assign_router(Topic) when is_binary(Topic) ->
                 false -> ets:lookup_element(?ROUTERETS, Topic, 2)  % lost the race
             end
     end.
+
+-spec remote_subs_as_subscribers(Topic, Module) -> [#subscriber{}] when
+    Topic   :: topic(),
+    Module  :: 'undefined' | module().
+
+remote_subs_as_subscribers(Topic, Module) ->
+    ExactMS = [{#remote_sub{key = {Topic, Module, '_'}, _ = '_'}, [], ['$_']}],
+    AnyMS   = [{#remote_sub{key = {Topic, undefined, '_'}, _ = '_'}, [], ['$_']}],
+    Exact   = ets:select(?REMOTETS, ExactMS),
+    Any     = case Module of
+        undefined -> [];
+        _         -> ets:select(?REMOTETS, AnyMS)
+    end,
+    [remote_sub_to_subscriber(R) || R <- Exact ++ Any].
+
+-spec remote_sub_to_subscriber(RemoteSub) -> #subscriber{} when
+    RemoteSub :: #remote_sub{}.
+
+remote_sub_to_subscriber(#remote_sub{key = {Topic, Module, _Node}, dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}) ->
+    #subscriber{topic = Topic, module = Module, is_final_topic = true, dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}.
 
 % @doc if subsctiber is a process PId, let's establish monitor and unsubscribe when subscriber dies.
 % if subscriber is a registered process, we will keep subscribtion up, as another process may be registered with the same name, so

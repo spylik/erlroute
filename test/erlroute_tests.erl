@@ -1186,8 +1186,7 @@ cross_node_test_() ->
 
 do_cross_node_remote_pub() ->
     {ok, _} = application:ensure_all_started(erlroute),
-    [_, Host] = string:split(atom_to_list(node()), "@"),
-    {ok, Peer, PeerNode} = start_erlroute_peer(Host, "erlroute_peer"),
+    {ok, Peer, PeerNode} = start_erlroute_peer("erlroute_peer"),
 
     Cleanup = fun() ->
         catch peer:stop(Peer),
@@ -1311,18 +1310,18 @@ run_remote_pub_variant_process_cast(PeerNode) ->
     _ = sys:get_state(erlroute),
 
     %% Producer-side route must be the bypass shape — not erlroute_on_other_node.
-    BypassMS = [{#subscriber{topic = Topic,
+    BypassMS = [{#remote_sub{key = {Topic, '_', PeerNode},
                              dest_type = process_on_other_node,
                              dest = {PeerNode, RegName},
                              method = cast,
                              _ = '_'},
                  [], [true]}],
-    ?assertEqual(1, ets:select_count('$erlroute_subscribers', BypassMS)),
-    RouterMS = [{#subscriber{topic = Topic,
+    ?assertEqual(1, ets:select_count(?REMOTETS, BypassMS)),
+    RouterMS = [{#remote_sub{key = {Topic, '_', '_'},
                              dest_type = erlroute_on_other_node,
                              _ = '_'},
                  [], [true]}],
-    ?assertEqual(0, ets:select_count('$erlroute_subscribers', RouterMS)),
+    ?assertEqual(0, ets:select_count(?REMOTETS, RouterMS)),
 
     EtsName = erlroute:cache_table(?MODULE),
     erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
@@ -1401,12 +1400,12 @@ run_remote_pub_variant_function(PeerNode) ->
     %% peer's assigned router pid for this topic.
     ExpectedRouter = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
     ?assert(is_pid(ExpectedRouter)),
-    RouteMS = [{#subscriber{topic = Topic,
+    RouteMS = [{#remote_sub{key = {Topic, '_', PeerNode},
                             dest_type = erlroute_on_other_node,
                             dest = {PeerNode, ExpectedRouter},
                             _ = '_'},
                 [], [true]}],
-    ?assertEqual(1, ets:select_count('$erlroute_subscribers', RouteMS)),
+    ?assertEqual(1, ets:select_count(?REMOTETS, RouteMS)),
 
     EtsName = erlroute:cache_table(?MODULE),
     erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
@@ -1449,12 +1448,12 @@ run_multi_process_flips_to_pool(PeerNode) ->
     _ = sys:get_state(erlroute),
 
     %% Publisher-side: exactly one pool route to the peer, no direct routes.
-    PoolMS = [{#subscriber{topic = Topic, dest_type = erlroute_on_other_node, dest = {PeerNode, '_'}, _ = '_'},
+    PoolMS = [{#remote_sub{key = {Topic, '_', PeerNode}, dest_type = erlroute_on_other_node, _ = '_'},
                [], [true]}],
-    DirectMS = [{#subscriber{topic = Topic, dest_type = process_on_other_node, dest = {PeerNode, '_'}, _ = '_'},
+    DirectMS = [{#remote_sub{key = {Topic, '_', PeerNode}, dest_type = process_on_other_node, _ = '_'},
                  [], [true]}],
-    ?assertEqual(1, ets:select_count('$erlroute_subscribers', PoolMS)),
-    ?assertEqual(0, ets:select_count('$erlroute_subscribers', DirectMS)),
+    ?assertEqual(1, ets:select_count(?REMOTETS, PoolMS)),
+    ?assertEqual(0, ets:select_count(?REMOTETS, DirectMS)),
 
     EtsName = erlroute:cache_table(?MODULE),
     erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
@@ -1486,12 +1485,12 @@ run_mixed_process_and_function_via_pool(PeerNode) ->
     _ = sys:get_state(erlroute),
 
     %% Mixed subscribers force the pool route; no direct route to the process.
-    PoolMS = [{#subscriber{topic = Topic, dest_type = erlroute_on_other_node, dest = {PeerNode, '_'}, _ = '_'},
+    PoolMS = [{#remote_sub{key = {Topic, '_', PeerNode}, dest_type = erlroute_on_other_node, _ = '_'},
                [], [true]}],
-    DirectMS = [{#subscriber{topic = Topic, dest_type = process_on_other_node, dest = {PeerNode, '_'}, _ = '_'},
+    DirectMS = [{#remote_sub{key = {Topic, '_', PeerNode}, dest_type = process_on_other_node, _ = '_'},
                  [], [true]}],
-    ?assertEqual(1, ets:select_count('$erlroute_subscribers', PoolMS)),
-    ?assertEqual(0, ets:select_count('$erlroute_subscribers', DirectMS)),
+    ?assertEqual(1, ets:select_count(?REMOTETS, PoolMS)),
+    ?assertEqual(0, ets:select_count(?REMOTETS, DirectMS)),
 
     EtsName = erlroute:cache_table(?MODULE),
     erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
@@ -1519,13 +1518,12 @@ do_cross_node_multi_node_no_dup() ->
     %% join, which perturbs dispatch and hides the bug. A clean 3-peer mesh
     %% is the faithful reproduction.
     _ = application:stop(erlroute),
-    [_, Host] = string:split(atom_to_list(node()), "@"),
     %% Three fresh peers in a full mesh; publish from one of them. (Publishing
     %% from the test/controller node hides the bug — its cache carries state
     %% from earlier tests.)
-    {ok, PeerA, NodeA} = start_erlroute_peer(Host, "erlroute_mn_a"),
-    {ok, PeerB, NodeB} = start_erlroute_peer(Host, "erlroute_mn_b"),
-    {ok, PeerC, NodeC} = start_erlroute_peer(Host, "erlroute_mn_c"),
+    {ok, PeerA, NodeA} = start_erlroute_peer("erlroute_mn_a"),
+    {ok, PeerB, NodeB} = start_erlroute_peer("erlroute_mn_b"),
+    {ok, PeerC, NodeC} = start_erlroute_peer("erlroute_mn_c"),
     StopPeers = fun() -> [catch peer:stop(P) || P <- [PeerA, PeerB, PeerC]] end,
     Cleanup = fun() -> StopPeers(), application:stop(erlroute) end,
     Nodes = [NodeA, NodeB, NodeC],
@@ -1596,12 +1594,15 @@ epmd_running() ->
         {error, _} -> false
     end.
 
-start_erlroute_peer(Host, Prefix) ->
+start_erlroute_peer(Prefix) ->
     Name = list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive]))),
-    %% Hand the peer our exact cookie so it doesn't depend on ~/.erlang.cookie
-    %% matching — works whether the cookie was auto-generated by net_kernel or
-    %% inherited from the runner.
-    {ok, Peer, Node} = peer:start_link(#{name => Name, host => Host,
+    %% connection => standard_io: peer signals readiness via stdin/stdout so no
+    %% hostname resolution is needed at startup (default 'dist' would require the
+    %% peer to connect BACK to the controller, which fails when the controller's
+    %% shortname, e.g. "192", is not resolvable).  Subsequent rpc:call goes
+    %% controller→peer at "localhost" which always resolves.
+    {ok, Peer, Node} = peer:start_link(#{name => Name, host => "localhost",
+                                         connection => standard_io,
                                          args => ["-setcookie", atom_to_list(erlang:get_cookie())]}),
     true = rpc:call(Node, code, set_path, [code:get_path()]),
     {ok, _} = rpc:call(Node, application, ensure_all_started, [erlroute]),
@@ -1636,9 +1637,9 @@ wait_erlroute_mesh(Nodes, Timeout) ->
 wait_remote_route_count(_Nodes, _Topic, _Expected, Timeout) when Timeout =< 0 ->
     erlang:error(remote_routes_not_ready);
 wait_remote_route_count(Nodes, Topic, Expected, Timeout) ->
-    MS = [{#subscriber{topic = Topic, dest_type = erlroute_on_other_node, _ = '_'}, [], [true]}],
+    MS = [{#remote_sub{key = {Topic, '_', '_'}, dest_type = erlroute_on_other_node, _ = '_'}, [], [true]}],
     Ready = lists:all(fun(N) ->
-        rpc:call(N, ets, select_count, ['$erlroute_subscribers', MS]) =:= Expected
+        rpc:call(N, ets, select_count, [?REMOTETS, MS]) =:= Expected
     end, Nodes),
     case Ready of
         true  -> ok;
@@ -1664,8 +1665,7 @@ collect_tagged_hits(Acc, Cap) ->
 %% manual nudging. Driven by cross_node_test_/0.
 do_cross_node_symmetric_discovery() ->
     {ok, _} = application:ensure_all_started(erlroute),
-    [_, Host] = string:split(atom_to_list(node()), "@"),
-    {ok, Peer, PeerNode} = start_erlroute_peer(Host, "erlroute_disc"),
+    {ok, Peer, PeerNode} = start_erlroute_peer("erlroute_disc"),
     Self = node(),
     try
         ok = wait_until(fun() ->
@@ -1684,9 +1684,8 @@ do_cross_node_symmetric_discovery() ->
 
 do_cross_node_discovery_settles() ->
     {ok, _} = application:ensure_all_started(erlroute),
-    [_, Host] = string:split(atom_to_list(node()), "@"),
-    {ok, PeerB, NodeB} = start_erlroute_peer(Host, "erlroute_settle_b"),
-    {ok, PeerC, NodeC} = start_erlroute_peer(Host, "erlroute_settle_c"),
+    {ok, PeerB, NodeB} = start_erlroute_peer("erlroute_settle_b"),
+    {ok, PeerC, NodeC} = start_erlroute_peer("erlroute_settle_c"),
     Nodes = [node(), NodeB, NodeC],
     %% One counting tracer per node, local to that node, watching its own
     %% erlroute process' control-plane receives.

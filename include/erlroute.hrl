@@ -9,6 +9,7 @@
     ]).
 
 -define(DEFAULT_ROUTER_POOL_SIZE, 10).
+-define(REMOTETS, '$erlroute_remote_routes').
 
 -record(erlroute_state, {
         erlroute_nodes = []     :: [node()],
@@ -64,6 +65,14 @@
         dest_type               :: dest_type() | matchspec(),
         dest                    :: dest() | matchspec(),
         method = 'info'         :: delivery_method() | matchspec(),
+        sub_ref                 :: integer() | matchspec()
+    }).
+
+-record(remote_sub, {
+        key                     :: {topic(), 'undefined' | module(), node()} | matchspec(),
+        dest_type               :: 'process_on_other_node' | 'erlroute_on_other_node' | matchspec(),
+        dest                    :: dest() | matchspec(),
+        method                  :: delivery_method() | matchspec(),
         sub_ref                 :: integer() | matchspec()
     }).
 
