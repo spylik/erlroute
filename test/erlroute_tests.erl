@@ -1092,26 +1092,26 @@ router_pool_test_() ->
         fun cleanup/1,
         {inorder,
             [
-                {<<"router pool starts at default size (10), each registered">>,
+                {<<"router pool starts at default size (10), all live">>,
                     fun() ->
                         ?assertEqual(10, erlroute:router_pool_size()),
-                        lists:foreach(fun(Index) ->
-                            ?assert(is_pid(whereis(erlroute:router_name(Index))))
-                        end, lists:seq(1, 10)),
-                        %% one past the pool must not be registered
-                        ?assertEqual(undefined, whereis(erlroute:router_name(11)))
+                        Pool = ets:lookup_element('$erlroute_routers', '$routers', 2),
+                        ?assertEqual(10, tuple_size(Pool)),
+                        lists:foreach(fun(Pid) -> ?assert(is_process_alive(Pid)) end,
+                                      tuple_to_list(Pool))
                     end},
-                {<<"router_index is stable per topic and maps to a registered router">>,
+                {<<"assign_router is sticky per topic and returns a pool member">>,
                     fun() ->
+                        Pool = tuple_to_list(ets:lookup_element('$erlroute_routers', '$routers', 2)),
                         Topic = <<"alpha.topic">>,
-                        Index = erlroute:router_index(Topic),
-                        ?assert(is_integer(Index) andalso Index >= 1 andalso Index =< 10),
-                        ?assertEqual(Index, erlroute:router_index(Topic)),
-                        ?assert(is_pid(whereis(erlroute:router_name(Index))))
+                        Pid = erlroute:assign_router(Topic),
+                        ?assert(is_pid(Pid)),
+                        ?assertEqual(Pid, erlroute:assign_router(Topic)),   %% sticky
+                        ?assert(lists:member(Pid, Pool))
                     end},
-                {<<"topics spread across more than one router">>,
+                {<<"topics are spread round-robin across more than one router">>,
                     fun() ->
-                        Assigned = [erlroute:router_index(integer_to_binary(N)) || N <- lists:seq(1, 200)],
+                        Assigned = [erlroute:assign_router(integer_to_binary(N)) || N <- lists:seq(1, 200)],
                         ?assert(length(lists:usort(Assigned)) > 1)
                     end}
             ]
@@ -1293,7 +1293,7 @@ run_remote_pub_variant_process_cast(PeerNode) ->
     end.
 
 %% Send a hand-crafted remote_pub envelope to the peer's *assigned* router for
-%% the topic (resolved via the peer's own router_index), and verify that pool
+%% the topic (resolved via the peer's own assign_router), and verify that pool
 %% member dispatches it to a local subscriber on the peer.
 assert_assigned_router_dispatches_envelope(PeerNode) ->
     Topic   = <<"erlroute.crossnode.remote_pub.async_envelope">>,
@@ -1315,11 +1315,11 @@ assert_assigned_router_dispatches_envelope(PeerNode) ->
         erlang:error(envelope_subscribed_timeout)
     end,
 
-    Index = rpc:call(PeerNode, erlroute, router_index, [Topic]),
-    ?assert(is_integer(Index)),
+    RouterPid = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
+    ?assert(is_pid(RouterPid)),
 
     EtsName = erlroute:cache_table(?MODULE),
-    erlang:send({erlroute:router_name(Index), PeerNode},
+    erlang:send(RouterPid,
                 {remote_pub, ?MODULE, self(), ?LINE, Topic, Payload, async, EtsName}),
 
     receive
@@ -1331,7 +1331,7 @@ assert_assigned_router_dispatches_envelope(PeerNode) ->
 
 %% End-to-end pool path: a function subscriber on the peer becomes an
 %% erlroute_on_other_node route on the publisher, addressed by the peer's
-%% assigned router index. Publishing locally must reach the peer's function via
+%% assigned router pid. Publishing locally must reach the peer's function via
 %% that router.
 run_remote_pub_variant_function(PeerNode) ->
     Topic   = <<"erlroute.crossnode.remote_pub.function">>,
@@ -1356,12 +1356,12 @@ run_remote_pub_variant_function(PeerNode) ->
     _ = sys:get_state(erlroute),
 
     %% Publisher-side route must be erlroute_on_other_node addressed by the
-    %% peer's assigned router index for this topic.
-    ExpectedIndex = rpc:call(PeerNode, erlroute, router_index, [Topic]),
-    ?assert(is_integer(ExpectedIndex)),
+    %% peer's assigned router pid for this topic.
+    ExpectedRouter = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
+    ?assert(is_pid(ExpectedRouter)),
     RouteMS = [{#subscriber{topic = Topic,
                             dest_type = erlroute_on_other_node,
-                            dest = {PeerNode, ExpectedIndex},
+                            dest = {PeerNode, ExpectedRouter},
                             _ = '_'},
                 [], [true]}],
     ?assertEqual(1, ets:select_count('$erlroute_subscribers', RouteMS)),

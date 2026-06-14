@@ -12,6 +12,7 @@
 -endif.
 
 -define(SUBETS, '$erlroute_subscribers').
+-define(ROUTERETS, '$erlroute_routers').
 
 -define(DEFAULT_TIMEOUT_FOR_RPC, 1000).
 -define(SERVER, ?MODULE).
@@ -47,9 +48,7 @@
         post_hitcache_routine/10,
         gen_static_fun_dest/2,
         fetch_flow_dests_and_sources/0,
-        erlroute_cache_etses/0,
-        router_name/1,         % router pool support (erlroute_router / _sup)
-        router_pool_size/0
+        erlroute_cache_etses/0
     ]).
 
 % ----------------------------- gen_server part --------------------------------
@@ -99,17 +98,20 @@ init([]) ->
             {keypos, #subscriber.topic},
             named_table
         ]),
+    _ = ets:new(?ROUTERETS, [set, public, named_table, {read_concurrency, true}]),
     Routers = start_routers(router_pool_size()),
+    true = ets:insert(?ROUTERETS, [{'$routers', list_to_tuple(Routers)}, {'$next', 0}]),
     _ = net_kernel:monitor_nodes(true),
     Nodes = discover_erlroute_nodes(),
     _ = fetch_subscribtions_from_remote_nodes(Nodes),
     _ = announce_to_nodes(nodes()),
-    {ok, #erlroute_state{erlroute_nodes = Nodes, routers = Routers}}.
+    {ok, #erlroute_state{erlroute_nodes = Nodes}}.
 
+% Spawn the linked, anonymous router pool.
 -spec start_routers(N :: pos_integer()) -> [pid()].
 
 start_routers(N) ->
-    [begin {ok, Pid} = erlroute_router:start_link(Index), Pid end || Index <- lists:seq(1, N)].
+    [begin {ok, Pid} = erlroute_router:start_link(), Pid end || _ <- lists:seq(1, N)].
 
 %--------------handle_call-----------------
 
@@ -203,8 +205,8 @@ handle_info({set_remote_route, FlowSource, Descriptor, Node}, State) ->
     _ = case Descriptor of
         {direct, Proc, Method} ->
             subscribe(FlowSource, {process_on_other_node, {Node, Proc}, Method});
-        {pool, Index} ->
-            subscribe(FlowSource, {erlroute_on_other_node, {Node, Index}, pub_type_based})
+        {pool, RouterPid} ->
+            subscribe(FlowSource, {erlroute_on_other_node, {Node, RouterPid}, pub_type_based})
     end,
     {noreply, State};
 
@@ -216,9 +218,10 @@ handle_info({'DOWN', _Ref, process, Pid, _Reason}, #erlroute_state{monitors = Mo
     _ = unsubscribe_local_pid(Pid, ErlRouteNodes),
     {noreply, State#erlroute_state{monitors = maps:remove(Pid, Monitors)}};
 
-% One of router died — which is not supposed to happen. Take erlroute down with it
-handle_info({'EXIT', Pid, Reason}, #erlroute_state{routers = Routers} = State) ->
-    case lists:member(Pid, Routers) of
+% A pool router died — which is not supposed to happen. Take erlroute down with
+% it; erlroute_sup restarts the whole pool together.
+handle_info({'EXIT', Pid, Reason}, State) ->
+    case lists:member(Pid, router_pids()) of
         true  -> {stop, {router_died, Pid, Reason}, State};
         false -> {noreply, State}
     end;
@@ -234,9 +237,19 @@ handle_info(Msg, State) ->
     Reason      :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
     State       :: erlroute_state().
 
-terminate(_Reason, #erlroute_state{routers = Routers}) ->
-    _ = stop_routers(Routers),
+terminate(_Reason, _State) ->
+    _ = stop_routers(router_pids()),
     ok.
+
+% Current router pids (the pool tuple as a list); [] if the pool table is gone.
+-spec router_pids() -> [pid()].
+
+router_pids() ->
+    try ets:lookup_element(?ROUTERETS, '$routers', 2) of
+        Routers -> tuple_to_list(Routers)
+    catch
+        _:_ -> []
+    end.
 
 -spec stop_routers(Routers :: [pid()]) -> ok.
 
@@ -597,8 +610,8 @@ send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {
     _ = Scope =:= local orelse erlang:send({Proc, Node}, {'$gen_cast', Payload}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc], Scope);
 
-send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = {Node, Index} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) ->
-    _ = Scope =:= local orelse erlang:send({router_name(Index), Node}, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
+send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = {_Node, RouterPid} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) ->
+    _ = Scope =:= local orelse erlang:send(RouterPid, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc], Scope);
 
 % final clause for empty list
@@ -1118,8 +1131,8 @@ fetch_subscribtions_from_remote_nodes(Nodes) ->
                 case Descriptor of
                     {direct, Proc, Method} ->
                         subscribe(FlowSource, {process_on_other_node, {Node, Proc}, Method});
-                    {pool, Index} ->
-                        subscribe(FlowSource, {erlroute_on_other_node, {Node, Index}, pub_type_based})
+                    {pool, RouterPid} ->
+                        subscribe(FlowSource, {erlroute_on_other_node, {Node, RouterPid}, pub_type_based})
                 end
             end, Descriptors);
         ({_Node, _OtherResp}) ->
@@ -1226,7 +1239,7 @@ descriptor_from_subscribers([], _Topic) ->
 descriptor_from_subscribers([{process, Proc, Method}], _Topic) ->
     {direct, Proc, Method};
 descriptor_from_subscribers(_MultipleOrNonProcess, Topic) ->
-    {pool, router_index(Topic)}.
+    {pool, assign_router(Topic)}.
 
 % Re-propagate to remotes only if the local change flipped the descriptor.
 -spec propagate_local_change(Topic, Module, Before, ErlRouteNodes) -> ok when
@@ -1260,22 +1273,28 @@ maybe_propagate_descriptor(_Before, After, FlowSource, ErlRouteNodes) ->
 router_pool_size() ->
     erlang:max(1, application:get_env(erlroute, router_pool_size, ?DEFAULT_ROUTER_POOL_SIZE)).
 
-% @doc Registered name of the router at a given pool index.
--spec router_name(Index) -> atom() when
-    Index :: pos_integer().
-
-router_name(Index) when is_integer(Index) ->
-    list_to_atom("erlroute_router_" ++ integer_to_list(Index)).
-
-% Stable hash of a topic onto the pool: same topic -> same router index, so
-% per-topic order is preserved. Pure arithmetic — the index is carried in the
-% route and resolved to the live router by registered name (router_name/1) at
-% send time, so a router restart heals automatically via name re-registration.
--spec router_index(Topic) -> pos_integer() when
+% @doc The router pid assigned to a topic. The binding is sticky — once a topic
+% is bound to a router, all its subscribers (and so per-topic message order)
+% stay on that router — and assigned round-robin on first use. Kept in a public
+% ETS table (not a pure hash) so it can be rebalanced later, e.g. by message
+% queue depth, by overwriting the binding and re-propagating. Resolves
+% concurrent first-use via insert_new.
+-spec assign_router(Topic) -> pid() when
     Topic :: topic().
 
-router_index(Topic) when is_binary(Topic) ->
-    erlang:phash2(Topic, router_pool_size()) + 1.
+assign_router(Topic) when is_binary(Topic) ->
+    case ets:lookup(?ROUTERETS, Topic) of
+        [{Topic, Pid}] ->
+            Pid;
+        [] ->
+            Routers = ets:lookup_element(?ROUTERETS, '$routers', 2),
+            Seq = ets:update_counter(?ROUTERETS, '$next', 1),
+            Pid = element((Seq - 1) rem tuple_size(Routers) + 1, Routers),
+            case ets:insert_new(?ROUTERETS, {Topic, Pid}) of
+                true  -> Pid;
+                false -> ets:lookup_element(?ROUTERETS, Topic, 2)  % lost the race
+            end
+    end.
 
 % @doc if subsctiber is a process PId, let's establish monitor and unsubscribe when subscriber dies.
 % if subscriber is a registered process, we will keep subscribtion up, as another process may be registered with the same name, so

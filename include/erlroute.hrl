@@ -12,8 +12,7 @@
 
 -record(erlroute_state, {
         erlroute_nodes = []     :: [node()],
-        monitors = #{}          :: #{pid() => reference()},
-        routers = []            :: [pid()]
+        monitors = #{}          :: #{pid() => reference()}
     }).
 
 -type matchspec()           :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
@@ -24,7 +23,7 @@
 -type scope()                   :: 'all' | 'local'.
 -type topic()                   :: binary().
 -type proc()                    :: pid() | atom().
--type other_node_dest()         :: node() | {node(), proc()} | {node(), pos_integer()}.
+-type other_node_dest()         :: node() | {node(), proc()}.
 -type payload()                 :: term().
 
 
@@ -83,13 +82,13 @@
 
 -type delivery_descriptor()     :: 'none'
                                 |  {'direct', proc(), proc_delivery_method()}
-                                |  {'pool', pos_integer()}.
+                                |  {'pool', pid()}.
 
 -type flow_source()             :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
 -type flow_dest()               :: {process, proc(), proc_delivery_method()}
                                 |  {poolboy, atom(), proc_delivery_method()}
                                 |  {function, fun_dest(), function_delivery_method()}
-                                |  {erlroute_on_other_node, {node(), pos_integer()} | node(), pub_type_based}
+                                |  {erlroute_on_other_node, {node(), pid()} | node(), pub_type_based}
                                 |  {process_on_other_node, {node(), proc()}, proc_delivery_method()}.
 
 
