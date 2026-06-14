@@ -13,8 +13,6 @@
 -record(erlroute_state, {
         erlroute_nodes = []     :: [node()],
         monitors = #{}          :: #{pid() => reference()},
-        % the router pool, spawn_linked from erlroute's init; a router crash
-        % takes erlroute down with it (routers are not supposed to crash).
         routers = []            :: [pid()]
     }).
 
