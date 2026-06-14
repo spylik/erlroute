@@ -1084,6 +1084,60 @@ split_topic_test() ->
     ?assertEqual(["test1","*"], erlroute:split_topic(<<"test1.*">>)),
     ?assertEqual(["*","test1"], erlroute:split_topic(<<"*.test1">>)).
 
+monitor_test_() ->
+    {setup,
+        fun setup_start/0,
+        fun cleanup/1,
+        {inorder, [
+            {<<"duplicate subscribe for same pid creates exactly one monitor">>,
+                fun() ->
+                    Pid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
+                    FlowSource = #flow_source{module = tutils:random_atom(), topic = <<"#">>},
+                    erlroute:sub(FlowSource, {process, Pid, info}),
+                    erlroute:sub(FlowSource, {process, Pid, info}),
+                    #erlroute_state{monitors = Monitors} = sys:get_state(erlroute),
+                    ?assert(maps:is_key(Pid, Monitors)),
+                    %% exactly one beam monitor (no leak from the duplicate sub)
+                    {monitors, Mons} = process_info(self(), monitors),
+                    PidMons = [P || {process, P} <- Mons, P =:= Pid],
+                    ?assertEqual([], PidMons), % our test process didn't monitor it
+                    {monitored_by, Watchers} = process_info(Pid, monitored_by),
+                    ?assertEqual(1, length([W || W <- Watchers, W =:= whereis(erlroute)])),
+                    Pid ! stop
+                end},
+            {<<"unsub removes monitor when no subscriptions remain">>,
+                fun() ->
+                    Pid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
+                    FlowSource = #flow_source{module = tutils:random_atom(), topic = <<"#">>},
+                    erlroute:sub(FlowSource, {process, Pid, info}),
+                    #erlroute_state{monitors = M1} = sys:get_state(erlroute),
+                    ?assert(maps:is_key(Pid, M1)),
+                    erlroute:unsub(FlowSource, {process, Pid, info}),
+                    #erlroute_state{monitors = M2} = sys:get_state(erlroute),
+                    ?assertNot(maps:is_key(Pid, M2)),
+                    {monitored_by, Watchers} = process_info(Pid, monitored_by),
+                    ?assertEqual([], [W || W <- Watchers, W =:= whereis(erlroute)]),
+                    Pid ! stop
+                end},
+            {<<"unsub keeps monitor while other subscriptions for the pid remain">>,
+                fun() ->
+                    Pid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
+                    Module = tutils:random_atom(),
+                    FS1 = #flow_source{module = Module, topic = <<"t1">>},
+                    FS2 = #flow_source{module = Module, topic = <<"t2">>},
+                    erlroute:sub(FS1, {process, Pid, info}),
+                    erlroute:sub(FS2, {process, Pid, info}),
+                    erlroute:unsub(FS1, {process, Pid, info}),
+                    #erlroute_state{monitors = M1} = sys:get_state(erlroute),
+                    ?assert(maps:is_key(Pid, M1)),   %% still has FS2 sub
+                    erlroute:unsub(FS2, {process, Pid, info}),
+                    #erlroute_state{monitors = M2} = sys:get_state(erlroute),
+                    ?assertNot(maps:is_key(Pid, M2)), %% now fully removed
+                    Pid ! stop
+                end}
+        ]}
+    }.
+
 %% Router pool: started by the app supervision tree, default size, with stable
 %% per-topic assignment spread across the pool.
 router_pool_test_() ->
@@ -1133,10 +1187,7 @@ cross_node_test_() ->
 do_cross_node_remote_pub() ->
     {ok, _} = application:ensure_all_started(erlroute),
     [_, Host] = string:split(atom_to_list(node()), "@"),
-    PeerName = list_to_atom("erlroute_peer_" ++ integer_to_list(erlang:unique_integer([positive]))),
-    {ok, Peer, PeerNode} = peer:start_link(#{name => PeerName, host => Host}),
-    true = rpc:call(PeerNode, code, set_path, [code:get_path()]),
-    {ok, _} = rpc:call(PeerNode, application, ensure_all_started, [erlroute]),
+    {ok, Peer, PeerNode} = start_erlroute_peer(Host, "erlroute_peer"),
 
     Cleanup = fun() ->
         catch peer:stop(Peer),

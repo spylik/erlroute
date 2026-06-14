@@ -129,11 +129,11 @@ handle_call({subscribe, #flow_source{module = Module, topic = Topic} = FlowSourc
     _ = propagate_local_change(Topic, Module, Before, ErlrouteNodes),
     {reply, Result, State#erlroute_state{monitors = ProbablyMoreMonitors}};
 
-handle_call({unsubscribe, #flow_source{module = Module, topic = Topic} = FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlRouteNodes} = State) ->
+handle_call({unsubscribe, #flow_source{module = Module, topic = Topic} = FlowSource, FlowDest}, _From, #erlroute_state{erlroute_nodes = ErlRouteNodes, monitors = Monitors} = State) ->
     Before = delivery_descriptor(Topic, Module),
     delete_local_subscriber(FlowSource, FlowDest),
     _ = propagate_local_change(Topic, Module, Before, ErlRouteNodes),
-    {reply, ok, State};
+    {reply, ok, State#erlroute_state{monitors = may_release_monitor(FlowDest, Monitors)}};
 
 handle_call({regtable, EtsName}, _From, State) ->
     {reply, route_table_must_present(EtsName), State};
@@ -1302,9 +1302,29 @@ assign_router(Topic) when is_binary(Topic) ->
     Result      :: #{pid() => reference()}.
 
 may_establish_monitor({process, Proc, _DeliveryMethod}, Monitors) when is_pid(Proc) ->
-    maps:put(Proc, erlang:monitor(process, Proc), Monitors);
+    case maps:is_key(Proc, Monitors) of
+        true  -> Monitors;
+        false -> maps:put(Proc, erlang:monitor(process, Proc), Monitors)
+    end;
 
 may_establish_monitor(_NotMatch, Monitors) -> Monitors.
+
+% Remove the monitor for Proc if it has no remaining process subscriptions in SUBETS.
+-spec may_release_monitor(FlowDest, Monitors) -> Monitors when
+    FlowDest  :: flow_dest(),
+    Monitors  :: #{pid() => reference()}.
+
+may_release_monitor({process, Proc, _Method}, Monitors) when is_pid(Proc) ->
+    case ets:match(?SUBETS, #subscriber{dest_type = process, dest = Proc, _ = '_'}) of
+        [] ->
+            case maps:take(Proc, Monitors) of
+                {Ref, NewMonitors} -> erlang:demonitor(Ref, [flush]), NewMonitors;
+                error              -> Monitors
+            end;
+        _ ->
+            Monitors
+    end;
+may_release_monitor(_FlowDest, Monitors) -> Monitors.
 
 
 
