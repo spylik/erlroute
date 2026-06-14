@@ -210,13 +210,12 @@ handle_info({erlroute_sync, Node, Descriptors}, #erlroute_state{erlroute_nodes =
     end;
 
 handle_info({set_remote_route, FlowSource, Descriptor, Node}, State) ->
-    _ = remove_remote_routes(FlowSource, Node),
-    _ = case Descriptor of
-        {direct, Proc, Method} ->
-            subscribe(FlowSource, {process_on_other_node, {Node, Proc}, Method});
-        {pool, RouterPid} ->
-            subscribe(FlowSource, {erlroute_on_other_node, {Node, RouterPid}, pub_type_based})
+    NewFlowDest = case Descriptor of
+        {direct, Proc, Method} -> {process_on_other_node, {Node, Proc}, Method};
+        {pool, RouterPid}      -> {erlroute_on_other_node, {Node, RouterPid}, pub_type_based}
     end,
+    _ = subscribe(FlowSource, NewFlowDest),
+    _ = remove_stale_remote_routes(FlowSource, Node, NewFlowDest),
     {noreply, State};
 
 handle_info({remove_remote_route, FlowSource, Node}, State) ->
@@ -893,6 +892,45 @@ remove_remote_routes(#flow_source{module = Module, topic = Topic}, Node) ->
     end, CacheEtsSes),
     ok.
 
+-spec remove_stale_remote_routes(FlowSource, Node, NewFlowDest) -> ok when
+    FlowSource  :: flow_source(),
+    Node        :: node(),
+    NewFlowDest :: flow_dest().
+
+remove_stale_remote_routes(#flow_source{module = Module, topic = Topic}, Node,
+                            {NewDestType, {Node, NewPid}, _NewMethod}) ->
+    OtherType = case NewDestType of
+        process_on_other_node  -> erlroute_on_other_node;
+        erlroute_on_other_node -> process_on_other_node
+    end,
+    CacheEtses = case Module of
+        undefined   -> erlroute_cache_etses();
+        _SomeModule -> [cache_table(Module)]
+    end,
+    ets:match_delete(?SUBETS, #subscriber{topic = Topic, module = Module,
+        dest_type = OtherType, dest = {Node, '_'}, _ = '_'}),
+    ets:select_delete(?SUBETS, [{
+        #subscriber{topic = Topic, module = Module,
+                    dest_type = NewDestType, dest = {Node, '$1'}, _ = '_'},
+        [{'=/=', '$1', NewPid}],
+        [true]
+    }]),
+    lists:foreach(fun(CacheEts) ->
+        try
+            ets:match_delete(CacheEts, #cached_route{topic = Topic,
+                dest_type = OtherType, dest = {Node, '_'}, _ = '_'}),
+            ets:select_delete(CacheEts, [{
+                #cached_route{topic = Topic, dest_type = NewDestType,
+                              dest = {Node, '$1'}, _ = '_'},
+                [{'=/=', '$1', NewPid}],
+                [true]
+            }])
+        catch
+            _:_ -> ok
+        end
+    end, CacheEtses),
+    ok.
+
 % ================================ end of sub part =============================
 
 % ---------------------------------other functions -----------------------------
@@ -1097,12 +1135,16 @@ announce_to(Node) ->
 
 apply_remote_descriptors(Node, Descriptors) ->
     lists:foreach(fun({#flow_source{} = FlowSource, Descriptor}) ->
-        _ = remove_remote_routes(FlowSource, Node),
         case Descriptor of
-            {direct, Proc, Method} ->
-                subscribe(FlowSource, {process_on_other_node, {Node, Proc}, Method});
-            {pool, RouterPid} ->
-                subscribe(FlowSource, {erlroute_on_other_node, {Node, RouterPid}, pub_type_based})
+            none ->
+                remove_remote_routes(FlowSource, Node);
+            _ ->
+                NewFlowDest = case Descriptor of
+                    {direct, Proc, Method} -> {process_on_other_node, {Node, Proc}, Method};
+                    {pool, RouterPid}      -> {erlroute_on_other_node, {Node, RouterPid}, pub_type_based}
+                end,
+                _ = subscribe(FlowSource, NewFlowDest),
+                _ = remove_stale_remote_routes(FlowSource, Node, NewFlowDest)
         end
     end, Descriptors).
 
