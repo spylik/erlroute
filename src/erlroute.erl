@@ -960,22 +960,29 @@ post_hitcache_routine(Module, Process, Line, PubType, Topic, Payload, EtsName, W
         process = ProcessToWrite
     }),
     lists:foldl(
-        fun(#subscriber{module = SubscriberModule, dest_type = DestType, dest = Dest, method = Method, sub_ref = SubRef}, Acc) ->
-            case lists:member({Dest, Method}, Acc) of
-                false when (PostRef =:= undefined orelse PostRef > SubRef) andalso (Module =:= SubscriberModule orelse SubscriberModule =:= undefined) ->
-                    ToInsert = #cached_route{
-                        topic = Topic,
-                        dest_type = DestType,
-                        dest = Dest,
-                        method = Method,
-                        parent_topic = {?SUBETS, Topic}
-                    },
-                    Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope),
-                    ets:insert(route_table_must_present(EtsName), ToInsert),
-                    Toreturn;
-                _NoMatch ->
-                    Acc
-            end
+        fun
+            (#subscriber{module = SubModule, dest_type = DT, dest = Dest, method = Method, sub_ref = SubRef}, Acc) ->
+                case lists:member({Dest, Method}, Acc) of
+                    false when (PostRef =:= undefined orelse PostRef > SubRef) andalso
+                               (Module =:= SubModule orelse SubModule =:= undefined) ->
+                        ToInsert = #cached_route{topic = Topic, dest_type = DT, dest = Dest, method = Method,
+                                                 parent_topic = {?SUBETS, Topic}},
+                        Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope),
+                        ets:insert(route_table_must_present(EtsName), ToInsert),
+                        Toreturn;
+                    _ ->
+                        Acc
+                end;
+            (#remote_sub{key = {_, SubModule, _}, dest_type = DT, dest = Dest, method = Method}, Acc) ->
+                case lists:member({Dest, Method}, Acc) of
+                    false when Module =:= SubModule orelse SubModule =:= undefined ->
+                        ToInsert = #cached_route{topic = Topic, dest_type = DT, dest = Dest, method = Method},
+                        Toreturn = send([ToInsert], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope),
+                        ets:insert(route_table_must_present(EtsName), ToInsert),
+                        Toreturn;
+                    _ ->
+                        Acc
+                end
         end, WhoGetAlready, ets:lookup(?SUBETS, Topic) ++ remote_subs_as_subscribers(Topic, Module)
     ).
 
