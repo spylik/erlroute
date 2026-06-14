@@ -41,7 +41,7 @@
 -type shall_include_topic()     :: boolean().
 -type fun_dest()                :: {fun() | static_function(), shall_include_topic()}.
 
--type dest_type()               :: 'process' | 'poolboy' | 'function' | 'erlroute_on_other_node' | 'process_on_other_node'.
+-type dest_type()               :: 'process' | 'function' | 'erlroute_on_other_node' | 'process_on_other_node'.
 -type dest()                    :: proc() | fun_dest() | other_node_dest().
 
 % only for cache for final topics (generated with module name)
@@ -94,7 +94,6 @@
 
 -type flow_source()             :: #flow_source{} | [{'module', 'undefined' | module()} | {'topic', topic()}].
 -type flow_dest()               :: {process, proc(), proc_delivery_method()}
-                                |  {poolboy, atom(), proc_delivery_method()}
                                 |  {function, fun_dest(), function_delivery_method()}
                                 |  {erlroute_on_other_node, {node(), pid()} | node(), pub_type_based}
                                 |  {process_on_other_node, {node(), proc()}, proc_delivery_method()}.

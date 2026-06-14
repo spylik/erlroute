@@ -574,21 +574,6 @@ send([#cached_route{dest_type = 'function', method = Method, dest = {Function, S
     end,
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc], Scope);
 
-% sending to poolboy pool
-send([#cached_route{dest_type = 'poolboy', method = Method, dest = PoolName}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) ->
-    _ = try
-        Worker = poolboy:checkout(PoolName),
-        case Method of
-            info -> Worker ! Payload;
-            cast -> gen_server:cast(Worker, Payload);
-            call -> gen_server:call(Worker, Payload)
-        end,
-        poolboy:checkin(PoolName, Worker)
-    catch
-        X:Y -> error_logger:error_msg("Looks like poolboy pool ~p not found, got error ~p with reason ~p",[PoolName,X,Y]), Acc
-    end,
-    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{PoolName, Method} | Acc], Scope);
-
 % Cross-node routes. With Scope =:= local (a router fanning out an inbound
 % remote_pub) the actual send is skipped: the originating node already reached
 % every node, so re-forwarding would just duplicate / loop. The route is still
@@ -609,6 +594,14 @@ send([#cached_route{dest_type = 'process_on_other_node', method = cast, dest = {
     _ = Scope =:= local orelse erlang:send({Proc, Node}, {'$gen_cast', Payload}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, cast} | Acc], Scope);
 
+send([#cached_route{dest_type = 'process_on_other_node', method = call, dest = {_Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) when is_pid(Proc) ->
+    _ = Scope =:= local orelse (catch gen_server:call(Proc, Payload)),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, call} | Acc], Scope);
+
+send([#cached_route{dest_type = 'process_on_other_node', method = call, dest = {Node, Proc} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) when is_atom(Proc) ->
+    _ = Scope =:= local orelse (catch gen_server:call({Proc, Node}, Payload)),
+    send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, call} | Acc], Scope);
+
 send([#cached_route{dest_type = 'erlroute_on_other_node', method = Method, dest = {_Node, RouterPid} = Dest}|T], Payload, Module, Process, Line, PubType, Topic, EtsName, Acc, Scope) ->
     _ = Scope =:= local orelse erlang:send(RouterPid, {remote_pub, Module, Process, Line, Topic, Payload, PubType, EtsName}),
     send(T, Payload, Module, Process, Line, PubType, Topic, EtsName, [{Dest, Method} | Acc], Scope);
@@ -620,9 +613,6 @@ send([], _Payload, _Module, _Process, _Line, _PubType, _Topic, _EtsName, Acc, _S
 % ----------------------------------- sub part ---------------------------------
 
 % @doc Subscribe API to the message flow.
-% Erlroute suport pid, registered process name and the message pool like https://github.com/devinus/poolboy[Poolboy^] as destination.
-% For the process subscribed by pid or registered name it just send message.
-% For the pools for every new message it checkout one worker, then send message to that worker and then checkin.
 
 -spec sub(Target) -> ok when
     Target  :: flow_source() | [{topic, topic()} | {module, module()}] | topic() | module().
@@ -648,7 +638,7 @@ sub(FlowSource) when is_list(FlowSource) -> sub(FlowSource, {process, self(), in
 sub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
-        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' ->
+        DestType =:= 'process' orelse DestType =:= 'function' ->
     gen_server:call(?MODULE, {subscribe, FlowSource, {DestType, Dest, Method}});
 
 % when Dest is pid() or atom
@@ -775,7 +765,7 @@ unsub(FlowSource) when is_list(FlowSource) -> unsub(FlowSource, {process, self()
 unsub(FlowSource = #flow_source{module = Module, topic = Topic}, {DestType, Dest, Method}) when
         is_atom(Module),
         is_binary(Topic),
-        DestType =:= 'process' orelse DestType =:= 'poolboy' orelse DestType =:= 'function' ->
+        DestType =:= 'process' orelse DestType =:= 'function' ->
     gen_server:call(?MODULE, {unsubscribe, FlowSource, {DestType, Dest, Method}});
 
 % when Dest is pid() or atom
@@ -1174,7 +1164,7 @@ erlroute_cache_etses() ->
 local_descriptors() ->
     Groups = lists:foldl(fun
         (#subscriber{dest_type = DestType, topic = Topic, module = Module, dest = Dest, method = Method}, Acc)
-          when DestType =:= process; DestType =:= poolboy; DestType =:= function ->
+          when DestType =:= process; DestType =:= function ->
             maps:update_with({Topic, Module},
                 fun(Subs) -> [{DestType, Dest, Method} | Subs] end,
                 [{DestType, Dest, Method}], Acc);

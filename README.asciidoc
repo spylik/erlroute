@@ -1,79 +1,156 @@
 = Erlroute
 
-Erlroute is the simple router designed for http://www.jpaulmorrison.com/fbp/index.shtml[Flow Based Programming paradigm^].
+Erlroute is a pub/sub routing library for Erlang/OTP. Publishers emit messages tagged with a topic and the calling module; subscribers register destinations that receive those messages. The routing table lives in ETS so the hot path (cached routes) is a single ETS lookup with no gen_server round-trip.
 
-The main idea is to use `erlroute:pub` everywhere, where you may require the data now or in the future.
-
-Actually, erlroute do simple job - it just route messages or execution flows. Simply write `erlroute:pub` in places which
-will require dinamic route and "destination" you can define later.
-
-Destinations could be:
-* other local or remote processes;
-* functions (local and on remote nodes);
-* pool workers.
-
-== Why just do not use AMQP broker for this purpose?
-
-1. AMQP brokers are really great! With AMQP you able to implement very flexible and complex solutions. But sometimes, when you just need to route messages inside your erlang application use amqp-broker is like to shoot out of cannon into sparrows. When you do not need full AMQP features, erlroute is here.
-
-2. AMQP brokers designed for message passing and advanced message routine logic, meanwhile erlroute is a simple router
-designed for simple message passing and dynamic execution flows inside your Erlang applications.
-
-== When erlroute useful for you and when not so?
-
-* Erlroute useful if you are going to design dynamically environment where one group of listeners, in some cases may require data from producers and in some another cases not;
-* Erlroute useful when you want to implement dynamical execution pipelines (flows) within multiple processes or within the same;
-* Erlroute useful during development - you don't need anymore to think in advance about you may require the data from this line of code somwhere in future or not.
-* Erlroute useful to avoid multi-send constructions like:
+== Quick start
 
 [source,erlang]
 ----
-SomeData = {time, erlang:system_time()},
-process1 ! SomeData,
-process2 ! SomeData,
-process3 ! SomeData,
-process4 ! SomeData,
-process5 ! SomeData,
-process6 ! SomeData.
+%% Subscribe the current process to all messages from module my_producer
+erlroute:sub(my_producer).
+
+%% Subscribe to a specific topic from any module
+erlroute:sub(<<"sensor.temperature">>).
+
+%% Publish from inside my_producer — routing is a single ETS read after the first call
+erlroute:pub(?MODULE, self(), ?LINE, <<"sensor.temperature">>, Reading).
 ----
-With erlroute you can write just:
+
+== Topics and source matching
+
+A topic is any binary string. A subscriber can filter by topic, by the publishing module, or both:
+
 [source,erlang]
 ----
-erlroute:pub(<<"some_test_topic">>, {time, erlang:system_time()}).
+%% Any module, specific topic
+erlroute:sub(<<"sensor.temperature">>, self()).
+
+%% Specific module, any topic (wildcard <<"#">>)
+erlroute:sub(my_producer, self()).
+
+%% Both — specific module + specific topic
+erlroute:sub([{module, my_producer}, {topic, <<"sensor.temperature">>}], self()).
 ----
-And then, subscibers could easy to subscribe:
+
+The wildcard topic `<<"#">>` matches all published topics. It is the implicit topic when you subscribe to a module by atom.
+
+== Delivery destinations
+
+=== Process (pid or registered name)
 
 [source,erlang]
 ----
-erlroute:sub(<<"some_test_topic">>).
+%% Current process, default `info` delivery (plain message send)
+erlroute:sub(<<"events">>, self()).
+
+%% Registered name, cast delivery
+erlroute:sub(<<"events">>, {process, my_worker, cast}).
+
+%% Registered name, call delivery (blocks the pub call)
+erlroute:sub(<<"events">>, {process, my_worker, call}).
 ----
 
-You can also subscribe functions:
+=== Anonymous function
+
+The function receives the payload only (arity 1) or topic + payload (arity 2):
+
 [source,erlang]
 ----
-erlroute:sub(<<"some_test_topic">>, some_module_name, send_email, ["exampl@example.com"]).
-erlroute:sub(<<"some_test_topic">>, fun(Topic, Msg) -> do_some_stuff end).
+erlroute:sub(<<"events">>, fun(Payload) -> ... end).
+erlroute:sub(<<"events">>, fun(Topic, Payload) -> ... end).
 ----
 
-* Erlroute not useful if you are going to produce data which may required by applications written in other languages. In this case the best way is to use AMQP-broker. Erlroute designed only for internal erlang routes.
+=== Static MFA
 
-== Erlroute for erlang-driven evolutionary neural networks and genetic algorithms.
-Erlroute originally was developed as a playground for genetic algorithms. Actually it does the same job as axons and dendrits. Some neuron generate and produce signals via axons and other neurons receiving signals via dendrites. In erlroute axon output is `erlroute:pub` and dendites could be linked to axons by `erlroute:sub`. With erlroute you able to implement genetic evolution as well - you can obtain full list of availiable producers which match your specific criterias and topics and randomly create new links with `erlroute:sub` and randomly destroy existing with `erlroute:unsub` during your software evolution.
+[source,erlang]
+----
+%% Calls my_handler:on_event(Payload, ExtraArg) on publish
+erlroute:sub(<<"events">>, {my_handler, on_event, [ExtraArg]}).
+----
 
-== Key feutures:
+=== Function or MFA on a remote node
 
-* ets based;
-* due per module cache 'erlroute:pub' is very cheap;
-* support not only message passings, but functions and pools as destinations;
-* parse transform for build ets-names during compile time;
-* works both for local and distrubuted erlang modes;
-* cross-node auto-recovery of subscribtions after network splits in distributed mode;
-* auto-cleanups of subscribtions when the subscriber subscribed by it's own pid dies.
-* todo: s̶u̶p̶p̶o̶r̶t̶ ̶R̶a̶b̶b̶i̶t̶M̶Q̶-̶s̶t̶y̶l̶e̶ ̶r̶o̶u̶t̶i̶n̶g̶_̶k̶e̶y̶s̶
+[source,erlang]
+----
+erlroute:sub(<<"events">>, {remote_node@host, fun(P) -> ... end}).
+erlroute:sub(<<"events">>, {remote_node@host, {my_handler, on_event, []}}).
+----
 
-== Interface
+== Unsubscribe
 
-Erlroute support some useful shortcuts for prevent unnecessary terms constructions during runtime.
-To use shourtcuts `+{parse_transform, erlroute_transform}` must be added as compile options (suggested way).
+[source,erlang]
+----
+erlroute:unsub(<<"events">>, self()).
+erlroute:unsub(my_producer, self()).
+----
 
-Also you can use macros eg. `?PUB(Message)` from https://github.com/spylik/erlroute/blob/master/include/erlroute.hrl[erlroute.hrl^] instead of parse_transform, for this you need to `-include("erlroute.hrl").` in file from where you planning to call that macros (if you use parse transform you don't need it).
+Process subscriptions added via pid are cleaned up automatically when the process dies.
+
+== Publish modes
+
+[cols="1,3"]
+|===
+| Mode | Behaviour
+
+| `sync`
+| Delivers to all known subscribers before returning. Returns `[{Dest, Method}]`.
+
+| `async`
+| Spawns a process to handle delivery; returns `[]` immediately.
+
+| `hybrid`
+| Delivers synchronously to cached routes (the common case), then spawns a process to handle any uncached subscribers discovered in `?SUBETS` or remote routes. Returns the set of destinations hit synchronously.
+|===
+
+The default via parse transform is `hybrid`. Explicit call:
+
+[source,erlang]
+----
+erlroute:pub(?MODULE, self(), ?LINE, <<"events">>, Payload, sync,  erlroute:cache_table(?MODULE)).
+erlroute:pub(?MODULE, self(), ?LINE, <<"events">>, Payload, async, erlroute:cache_table(?MODULE)).
+erlroute:pub(?MODULE, self(), ?LINE, <<"events">>, Payload, hybrid,erlroute:cache_table(?MODULE)).
+----
+
+== Parse transform
+
+Add to your module's compile options:
+
+[source,erlang]
+----
+-compile({parse_transform, erlroute_transform}).
+----
+
+The transform rewrites `erlroute:pub` calls at compile time to embed the ETS cache table name as a literal atom and fill in `?MODULE`, `self()`, and `?LINE` automatically, eliminating all runtime overhead on the hot path:
+
+[source,erlang]
+----
+%% With parse transform — all args resolved at compile time
+erlroute:pub(<<"sensor.temperature">>, Reading).
+erlroute:pub(<<"sensor.temperature">>, Reading, sync).
+----
+
+Without parse transform, use the full form or the `?PUB` macros from `erlroute.hrl`.
+
+== Distributed Erlang
+
+Erlroute works transparently in a distributed cluster:
+
+* When a node subscribes to a topic, the subscription is propagated to all connected nodes via a one-time sync followed by incremental updates on change.
+* On publish, cross-node routes are dispatched via the router pool on the receiving node (`erlroute_router`), which fans out to local subscribers only — avoiding re-forward storms.
+* On node disconnect, all routes to that node are removed. On reconnect, a full sync restores them automatically.
+* Cross-node delivery supports process and poolboy destinations (the remote process or pool receives the message directly).
+
+== ETS caching and performance
+
+On the first publish to a `{Module, Topic}` pair, erlroute walks `?SUBETS` and any remote routes to build the delivery list, then writes `#cached_route` entries into a per-module ETS table. Subsequent publishes to the same topic hit this cache directly — no gen_server call, no ETS bag scan.
+
+Cache entries are invalidated automatically when:
+* a subscriber unsubscribes;
+* a subscribed process dies;
+* a remote route changes (node reconnects with a different router assignment).
+
+== When not to use erlroute
+
+* You need to exchange messages with non-Erlang services — use an AMQP broker or similar.
+* You need durable queues, persistence, or at-least-once delivery — erlroute is in-memory only.
+* You need content-based routing on message fields — erlroute routes on topic + module only.
