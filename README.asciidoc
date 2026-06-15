@@ -136,9 +136,8 @@ Without parse transform, use the full form or the `?PUB` macros from `erlroute.h
 Erlroute works transparently in a distributed cluster:
 
 * When a node subscribes to a topic, the subscription is propagated to all connected nodes via a one-time sync followed by incremental updates on change.
-* On publish, cross-node routes are dispatched via the router pool on the receiving node (`erlroute_router`), which fans out to local subscribers only — avoiding re-forward storms.
+* On publish, cross-node routes are dispatched via the router pool on the receiving node (`erlroute_router`), which fans out to local subscribers only.
 * On node disconnect, all routes to that node are removed. On reconnect, a full sync restores them automatically.
-* Cross-node delivery supports process and poolboy destinations (the remote process or pool receives the message directly).
 
 == ETS caching and performance
 

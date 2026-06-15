@@ -1,1088 +1,246 @@
 -module(erlroute_tests).
 
--compile({parse_transform, erlroute_transform}).
-
 -include_lib("eunit/include/eunit.hrl").
 -include("erlroute.hrl").
 
 -define(TESTSERVER, erlroute).
 
-
-% --------------------------------- fixtures ----------------------------------
-
-publish(Msg) ->
-    erlroute:pub(Msg).
-
-publish(Topic,Msg) ->
-    erlroute:pub(Topic, Msg).
-
-% tests for cover standart otp behaviour
+% tests for cover standard otp behaviour
 otp_test_() ->
     {setup,
-        fun disable_output/0, % setup
+        fun disable_output/0,
         {inorder,
             [
                 {<<"Application able to start via application:start()">>,
                     fun() ->
                         application:start(?TESTSERVER),
-                        ?assertEqual(
-                            ok,
-                            application:ensure_started(?TESTSERVER)
-                        ),
-                        ?assertEqual(
-                            true,
-                            is_pid(whereis(?TESTSERVER))
-                        )
+                        ?assertEqual(ok, application:ensure_started(?TESTSERVER)),
+                        ?assertEqual(true, is_pid(whereis(?TESTSERVER)))
                     end},
                 {<<"Application able to stop via application:stop()">>,
                     fun() ->
                         application:stop(?TESTSERVER),
-                        ?assertEqual(
-                            false,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                end},
+                        ?assertEqual(false, is_pid(whereis(?TESTSERVER)))
+                    end},
                 {<<"Application able to start via ?TESTSERVER:start_link()">>,
                     fun() ->
                         ?TESTSERVER:start_link(),
-                        ?assertEqual(
-                            true,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                end},
+                        ?assertEqual(true, is_pid(whereis(?TESTSERVER)))
+                    end},
                 {<<"Application able to stop via ?TESTSERVER:stop()">>,
                     fun() ->
                         ?assertEqual(ok, ?TESTSERVER:stop(sync)),
-                        ?assertEqual(
-                            false,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                end},
-                {<<"Application able to start and stop via ?TESTSERVER:start_link() / ?TESTSERVER:stop(sync)">>,
+                        ?assertEqual(false, is_pid(whereis(?TESTSERVER)))
+                    end},
+                {<<"Application able to start and stop via start_link / stop(sync)">>,
                     fun() ->
                         ?TESTSERVER:start_link(),
                         ?assertEqual(ok, ?TESTSERVER:stop(sync)),
-                        ?assertEqual(
-                            false,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                end},
-                {<<"Application able to start and stop via ?TESTSERVER:start_link() / ?TESTSERVER:stop()">>,
+                        ?assertEqual(false, is_pid(whereis(?TESTSERVER)))
+                    end},
+                {<<"Application able to start and stop via start_link / stop()">>,
                     fun() ->
                         ?TESTSERVER:start_link(),
                         ?assertEqual(ok, ?TESTSERVER:stop()),
-                        ?assertEqual(
-                            false,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                end},
-                {<<"Application able to start and stop via ?TESTSERVER:start_link() ?TESTSERVER:stop(async)">>,
+                        ?assertEqual(false, is_pid(whereis(?TESTSERVER)))
+                    end},
+                {<<"Application able to start and stop via start_link / stop(async)">>,
                     fun() ->
                         ?TESTSERVER:start_link(),
                         ?TESTSERVER:stop(async),
-                        timer:sleep(1), % for async cast
-                        ?assertEqual(
-                            false,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                end}
-
+                        timer:sleep(1),
+                        ?assertEqual(false, is_pid(whereis(?TESTSERVER)))
+                    end}
             ]
         }
     }.
 
-
-% tests which doesn't require started erlroute as gen_server process
 erlroute_non_started_test_() ->
     {setup,
         fun cleanup/0,
         {inparallel,
             [
-                {<<"When erlroute doesn't start, ets-table '$erlroute_topics' must be undefined">>,
+                {<<"When erlroute not started, '$erlroute_subscribers' must be undefined">>,
                     fun() ->
-                        ?assertEqual(
-                            undefined,
-                            ets:info('$erlroute_topics')
-                        )
+                        ?assertEqual(undefined, ets:info('$erlroute_subscribers'))
                     end},
-                 {<<"When erlroute doesn't start, ets-table '$erlroute_subscribers' must be undefined">>,
+                {<<"When erlroute not started, process erlroute must be unregistered">>,
                     fun() ->
-                        ?assertEqual(
-                            undefined,
-                            ets:info('$erlroute_subscribers')
-                        )
-                    end},
-                {<<"When erlroute doesn't start, process erlroute must be unregistered">>,
-                    fun() ->
-                        ?assertEqual(
-                            false,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                    end},
-
-                {<<"cache_table must generate correct ets table name when Type is by_module_name">>,
-                    fun() ->
-                        Source = test_producer,
-                        ?assertEqual(
-                            erlroute:cache_table(Source),
-                            '$erlroute_cache_test_producer'
-                        )
+                        ?assertEqual(false, is_pid(whereis(?TESTSERVER)))
                     end}
             ]
         }
     }.
 
-% tests which require started erlroute as gen_server process
 erlroute_started_test_() ->
     {setup,
         fun setup_start/0,
         fun cleanup/1,
         {inparallel,
-             [
-                {<<"When erlroute started is must be register as erlroute">>,
-                    fun() ->
-                        ?assertEqual(
-                            true,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                    end},
-                {<<"Unknown gen_calls messages must do not crash gen_server">>,
-                   fun() ->
-                       _ = gen_server:call(?TESTSERVER, {unknown, message}),
-                       timer:sleep(1), % for async cast
-                       ?assertEqual(
-                           true,
-                           is_pid(whereis(?TESTSERVER))
-                       )
-                   end},
-
-                {<<"Unknown gen_cast messages must do not crash gen_server">>,
-                   fun() ->
-                       gen_server:cast(?TESTSERVER, {unknown, message}),
-                       timer:sleep(1), % for async cast
-                       ?assertEqual(
-                           true,
-                           is_pid(whereis(?TESTSERVER))
-                       )
-                   end},
-
-                {<<"Unknown gen_info messages must do not crash gen_server">>,
-                   fun() ->
-                       ?TESTSERVER ! {unknown, message},
-                       timer:sleep(1), % for async cast
-                       ?assertEqual(
-                           true,
-                           is_pid(whereis(?TESTSERVER))
-                       )
-                   end},
-
-                {<<"When erlroute start, ets-table '$erlroute_topics' must be present">>,
-                    fun() ->
-                        ?assertNotEqual(
-                            undefined,
-                            ets:info('$erlroute_topics')
-                        )
-                    end
-                },
-                {<<"When erlroute start, ets-table '$erlroute_subscribers' must be present">>,
-                    fun() ->
-                        ?assertNotEqual(
-                            undefined,
-                            ets:info('$erlroute_subscribers')
-                        )
-                    end
-                }
-
-            ]
-        }
-    }.
-
-% test pub_routine
-erlroute_inorder_test_() ->
-    {setup,
-        fun setup_start/0,
-        fun cleanup/1,
-        {inorder,
             [
-                {<<"After pub/5 we must have one record in topics ets">>,
+                {<<"When erlroute started it must be registered as erlroute">>,
                     fun() ->
-                        % source
-                        ?assertEqual(0, ets:info('$erlroute_topics', size)),
-                        Module = tutils:random_atom(),
-                        SendTopic = <<"testtopic">>,
-                        Process = self(),
-                        Msg = make_ref(),
-                        erlroute:pub(Module, Process, ?LINE, SendTopic, Msg),
-                        timer:sleep(5),
-                        ?assertEqual(1, ets:info('$erlroute_topics', size))
+                        ?assertEqual(true, is_pid(whereis(?TESTSERVER)))
                     end},
-                {<<"After full_async_pub we must have two record in topics ets">>,
+                {<<"Unknown gen_call messages must not crash gen_server">>,
                     fun() ->
-                        % source
-                        ?assertEqual(1, ets:info('$erlroute_topics', size)),
-                        Module = tutils:random_atom(),
-                        SendTopic = <<"testtopic">>,
-                        Process = self(),
-                        Msg = make_ref(),
-                        erlroute:full_async_pub(Module, Process, ?LINE, SendTopic, Msg),
-                        timer:sleep(5),
-                        ?assertEqual(2, ets:info('$erlroute_topics', size))
+                        _ = gen_server:call(?TESTSERVER, {unknown, message}),
+                        timer:sleep(1),
+                        ?assertEqual(true, is_pid(whereis(?TESTSERVER)))
                     end},
-                {<<"After full_sync_pub we must have three record in topics ets">>,
+                {<<"Unknown gen_cast messages must not crash gen_server">>,
                     fun() ->
-                        % source
-                        ?assertEqual(2, ets:info('$erlroute_topics', size)),
-                        Module = tutils:random_atom(),
-                        SendTopic = <<"testtopic">>,
-                        Process = self(),
-                        Msg = make_ref(),
-                        erlroute:full_sync_pub(Module, Process, ?LINE, SendTopic, Msg),
-                        timer:sleep(5),
-                        ?assertEqual(3, ets:info('$erlroute_topics', size))
+                        gen_server:cast(?TESTSERVER, {unknown, message}),
+                        timer:sleep(1),
+                        ?assertEqual(true, is_pid(whereis(?TESTSERVER)))
                     end},
-                {<<"After pub we must have for record and one record in topics ets with right data">>,
+                {<<"Unknown gen_info messages must not crash gen_server">>,
                     fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"testtopic">>,
-                        Process = self(),
-                        Msg = make_ref(),
-                        Line = 123,
-                        erlroute:pub(Module, Process, 123, Topic, Msg),
-                        timer:sleep(5),
-                        ?assertEqual(4, ets:info('$erlroute_topics', size)),
-                        MS = [{
-                                #topics{
-                                    topic = Topic,
-                                    words = ["testtopic"],
-                                    module = Module,
-                                    process = '_',
-                                    line = Line
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count('$erlroute_topics', MS))
+                        ?TESTSERVER ! {unknown, message},
+                        timer:sleep(1),
+                        ?assertEqual(true, is_pid(whereis(?TESTSERVER)))
                     end},
-                {<<"When we pub message to same topic, we do not add anything">>,
+                {<<"When erlroute starts, '$erlroute_subscribers' must be present">>,
                     fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"testtopic">>,
-                        Process = self(),
-                        Msg = make_ref(),
-                        Line = 123,
-                        ?assertEqual(4, ets:info('$erlroute_topics', size)),
-                        erlroute:pub(Module, Process, 123, Topic, Msg),
-                        timer:sleep(5),
-                        ?assertEqual(5, ets:info('$erlroute_topics', size)),
-                        MS = [{
-                                #topics{
-                                    topic = Topic,
-                                    words = ["testtopic"],
-                                    module = Module,
-                                    process = '_',
-                                    line = Line
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count('$erlroute_topics', MS)),
-                        erlroute:pub(Module, Process, 123, Topic, Msg),
-                        timer:sleep(5),
-                        ?assertEqual(5, ets:info('$erlroute_topics', size)),
-                        ?assertEqual(1, ets:select_count('$erlroute_topics', MS))
-                    end},
-                {<<"When we pub message from another module, we must have 2 entry for topic and one if match by full">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"testtopic2">>,
-                        Process = self(),
-                        Msg = make_ref(),
-                        Line = 123,
-                        erlroute:pub(Module, Process, 123, Topic, Msg),
-                        timer:sleep(5),
-                        ?assertEqual(6, ets:info('$erlroute_topics', size)),
-                        MS1 = [{
-                                #topics{
-                                    topic = Topic,
-                                    words = ["testtopic2"],
-                                    process = '_',
-                                    line = Line,
-                                    _ = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count('$erlroute_topics', MS1)),
-                        Module2 = tutils:random_atom(),
-
-                        erlroute:pub(Module2, Process, 123, Topic, Msg),
-                        timer:sleep(5),
-                        ?assertEqual(2, ets:select_count('$erlroute_topics', MS1)),
-                        MSFull = [{
-                                #topics{
-                                    topic = Topic,
-                                    module = Module,
-                                    words = ["testtopic2"],
-                                    process = '_',
-                                    line = Line
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count('$erlroute_topics', MSFull))
-
+                        ?assertNotEqual(undefined, ets:info('$erlroute_subscribers'))
                     end}
             ]
         }
     }.
 
-
-erlroute_simple_defined_module_full_topic_messaging_test_() ->
+erlroute_pub_sub_test_() ->
     {setup,
         fun setup_start/0,
         fun cleanup/1,
         {inparallel,
-             [
-                {<<"After sub/1 with atom as parameter erlroute must subscribed to module output">>,
+            [
+                {<<"sub/1 adds subscriber to '$erlroute_subscribers'">>,
                     fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub(Module),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub(Module),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/1 with binary as parameter erlroute must subscribed to all modules, specified topic (simple topic)">>,
-                    fun() ->
-                        % source
-                        Topic = <<"testtopic">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = '$erlroute_subscribers',
+                        Topic = <<"sub1.test.", (rand_bin())/binary>>,
                         erlroute:sub(Topic),
-                        MS = [{
-                                #subscriber{
-                                    topic = Topic,
-                                    is_final_topic = true,
-                                    words = undefined,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    sub_ref = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub(Topic),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
+                        [{Topic, Subs}] = ets:lookup('$erlroute_subscribers', Topic),
+                        ?assert(lists:member({process, self(), info}, Subs)),
+                        erlroute:unsub(Topic)
                     end},
-                {<<"After sub/1 with binary as parameter erlroute must subscribed to all modules, specified topic (topic with parameters)">>,
+                {<<"sub/2 with explicit dest adds subscriber">>,
                     fun() ->
-                        % source
-                        Topic = <<"testtopic0.#.testtopic1">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = '$erlroute_subscribers',
+                        Topic = <<"sub2.dest.", (rand_bin())/binary>>,
+                        erlroute:sub(Topic, {process, self(), cast}),
+                        [{Topic, Subs}] = ets:lookup('$erlroute_subscribers', Topic),
+                        ?assert(lists:member({process, self(), cast}, Subs)),
+                        erlroute:unsub(Topic, {process, self(), cast})
+                    end},
+                {<<"duplicate sub is a no-op">>,
+                    fun() ->
+                        Topic = <<"dup.sub.", (rand_bin())/binary>>,
                         erlroute:sub(Topic),
-                        MS = [{
-                                #subscriber{
-                                    topic = Topic,
-                                    is_final_topic = false,
-                                    words = ["testtopic0","#","testtopic1"],
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    sub_ref = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
+                        erlroute:sub(Topic),
+                        erlroute:sub(Topic),
+                        [{Topic, Subs}] = ets:lookup('$erlroute_subscribers', Topic),
+                        ?assertEqual(1, length(Subs)),
+                        erlroute:unsub(Topic)
+                    end},
+                {<<"unsub removes subscriber">>,
+                    fun() ->
+                        Topic = <<"unsub.test.", (rand_bin())/binary>>,
+                        erlroute:sub(Topic),
                         erlroute:unsub(Topic),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
+                        ?assertEqual([], ets:lookup('$erlroute_subscribers', Topic))
                     end},
-                {<<"After sub/1 with list as parameter erlroute must subscribed to right topic and module (module+topic)">>,
+                {<<"double unsub is safe">>,
                     fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"testtopic">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub([{module, Module},{topic, Topic}]),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{module, Module},{topic, Topic}]),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
+                        Topic = <<"double.unsub.", (rand_bin())/binary>>,
+                        erlroute:sub(Topic),
+                        erlroute:unsub(Topic),
+                        erlroute:unsub(Topic),
+                        ?assertEqual([], ets:lookup('$erlroute_subscribers', Topic))
                     end},
-                {<<"After sub/1 with list as parameter erlroute must subscribed to right topic and module (module only)">>,
+                {<<"pub delivers message to single subscriber">>,
                     fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub([{module, Module}]),
-                        MS = [{
-                                #cached_route{
-                                    topic = <<"#">>,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{module, Module}]),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/1 with list as parameter erlroute must subscribed to right topic and module (topic only)">>,
-                    fun() ->
-                        % source
-                        Topic = <<"test.topic">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = '$erlroute_subscribers',
-                        erlroute:sub([{topic, Topic}]),
-                        MS = [{
-                                #subscriber{
-                                    topic = Topic,
-                                    is_final_topic = true,
-                                    words = undefined,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    sub_ref = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{topic, Topic}]),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 when Source is complete and dest is pid() whould subscribe as {process, Pid, info}">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub([{module, Module}, {topic, Topic}], Dest),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{module, Module}, {topic, Topic}], Dest),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 when Source is atom and dest is complete should subscribe to module">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub(Module, {DestType, Dest, Method}),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub(Module, {DestType, Dest, Method}),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 when Source is complete and dest is atom() whould subscribe as {process, Atom, info}">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = testregisteredprocess,
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub([{module, Module}, {topic, Topic}], Dest),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{module, Module}, {topic, Topic}], Dest),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 when Source is binary and dest is complete should subscribe globally to topic">>,
-                    fun() ->
-                        % source
-                        Topic = <<"testtopic1.testtopic2">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = '$erlroute_subscribers',
-                        erlroute:sub(Topic, {DestType, Dest, Method}),
-                        MS = [{
-                                #subscriber{
-                                    topic = Topic,
-                                    is_final_topic = true,
-                                    words = undefined,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    sub_ref = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub(Topic, {DestType, Dest, Method}),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 with full parameters and topic <<\"#\">>, ets tables must present and route entry must present in ets">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 with full parameters and topic <<\"#\">> (reversed), ets tables must present and route entry must present in ets">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-
-                {<<"After sub/2 with full parameters and topic <<\"#\">> (reversed), ets tables must present and route entry must present in ets">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-
-                {<<"After sub/2 without topic it should subscribe to <<\"#\">>">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        EtsTable = erlroute:cache_table(Module),
-                        erlroute:sub([{module, Module}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        MS = [{
-                                #cached_route{
-                                    topic = Topic,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    parent_topic = undefined
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                        erlroute:unsub([{module, Module}], {DestType, Dest, Method}),
-                        ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-
-                {<<"After multiple sync sub/6 attempts, ets tables must have only one route entry for each type/source">>,
-                    fun() ->
-                         % source
-                         Module = tutils:random_atom(),
-                         Topic = <<"#">>,
-                         % dest
-                         DestType = process,
-                         Dest = self(),
-                         Method = info,
-
-                         EtsTable = erlroute:cache_table(Module),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         erlroute:sub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         timer:sleep(5),
-                         MS = [{
-                                 #cached_route{
-                                     topic = Topic,
-                                     dest_type = DestType,
-                                     dest = Dest,
-                                     method = Method,
-                                     parent_topic = undefined
-                                 },
-                                 [],
-                                 [true]
-                             }],
-                         ?assertEqual(1, ets:select_count(EtsTable, MS)),
-                         erlroute:unsub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         ?assertEqual(0, ets:select_count(EtsTable, MS)),
-                         erlroute:unsub([{module, Module}, {topic, Topic}], {DestType, Dest, Method}),
-                         ?assertEqual(0, ets:select_count(EtsTable, MS))
-                    end},
-                {<<"After sub/2 with full parameters and topic <<\"testtopic.*.test1.test3\">>, ets tables must present and route entry must present in ets">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = <<"testtopic.*.test1.test3">>,
-                        % dest
-                        DestType = process,
-                        Dest = self(),
-                        Method = info,
-
-                        erlroute:sub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        MS = [{
-                                #subscriber{
-                                    topic = Topic,
-                                    module = Module,
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    words = ["testtopic","*","test1","test3"],
-                                    _ = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS)),
-                        erlroute:unsub([{topic, Topic}, {module, Module}], {DestType, Dest, Method}),
-                        ?assertEqual(0, ets:select_count('$erlroute_subscribers', MS))
-                    end},
-                {<<"Erlroute able to deliver message to single subscriber with exactly the same topic">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        SendTopic = <<"testtopic">>,
-                        SubTopic = <<"testtopic">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-
-                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+                        Topic = <<"deliver.single.", (rand_bin())/binary>>,
+                        Dest  = spawn_collector(self()),
+                        erlroute:sub(Topic, {process, Dest, info}),
                         Msg = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(Module, self(), ?LINE, SendTopic, Msg),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg], Ack),
+                        erlroute:pub(Topic, Msg),
+                        ?assertEqual([Msg], drain()),
                         Dest ! stop
-                end},
-
-                {<<"Erlroute able to deliver message to single subscriber who subscribe to wilcard topic">>,
+                    end},
+                {<<"pub delivers to multiple subscribers">>,
                     fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        SendTopic = <<"testtopic">>,
-                        SubTopic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-
-                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+                        Topic = <<"deliver.multi.", (rand_bin())/binary>>,
+                        D1 = spawn_collector(self()),
+                        D2 = spawn_collector(self()),
+                        erlroute:sub(Topic, {process, D1, info}),
+                        erlroute:sub(Topic, {process, D2, info}),
                         Msg = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(Module, self(), ?LINE, SendTopic, Msg),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg], Ack),
-                        Dest ! stop
-                end},
-
-                {<<"Erlroute able to deliver multiple message with different topic to single subscriber who subscribe to wilcard topic from same module">>,
+                        erlroute:pub(Topic, Msg),
+                        Received = drain(),
+                        ?assertEqual([Msg, Msg], lists:sort(Received)),
+                        D1 ! stop,
+                        D2 ! stop
+                    end},
+                {<<"no delivery after unsub">>,
                     fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        SendTopic1 = <<"testtopic1">>,
-                        SendTopic2 = <<"testtopic2">>,
-                        SubTopic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-
-                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
+                        Topic = <<"no.deliver.after.unsub.", (rand_bin())/binary>>,
+                        Dest = spawn_collector(self()),
+                        erlroute:sub(Topic, {process, Dest, info}),
+                        erlroute:unsub(Topic, {process, Dest, info}),
+                        erlroute:pub(Topic, make_ref()),
+                        timer:sleep(10),
+                        ?assertEqual([], drain()),
+                        Dest ! stop
+                    end},
+                {<<"any publisher module reaches topic subscriber">>,
+                    fun() ->
+                        Topic = <<"any.module.", (rand_bin())/binary>>,
+                        Dest  = spawn_collector(self()),
+                        erlroute:sub(Topic, {process, Dest, info}),
                         Msg1 = make_ref(),
                         Msg2 = make_ref(),
-                        timer:sleep(5),
-                        erlroute:pub(Module, self(), ?LINE, SendTopic1, Msg1),
-                        erlroute:pub(Module, self(), ?LINE, SendTopic2, Msg2),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual(lists:sort([Msg1, Msg2]), lists:sort(Ack)),
-                        Dest ! stop
-                end},
-                {<<"Messages from another module should do not delivered to another module subscribers">>,
-                    fun() ->
-                        % source
-                        Module1 = tutils:random_atom(),
-                        Module2 = tutils:random_atom(),
-                        SendTopic1 = <<"testtopic1">>,
-                        SendTopic2 = <<"testtopic2">>,
-                        SendTopic3 = <<"testtopic3">>,
-                        SubTopic = <<"#">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-
-                        erlroute:sub([{module, Module1}, {topic, SubTopic}], {DestType, Dest, Method}),
-                        Msg1 = make_ref(),
-                        Msg2 = make_ref(),
-                        Msg3 = make_ref(),
-
-                        timer:sleep(5),
-                        erlroute:pub(Module1, self(), ?LINE, SendTopic1, Msg1),
-                        erlroute:pub(Module1, self(), ?LINE, SendTopic2, Msg2),
-                        erlroute:pub(Module2, self(), ?LINE, SendTopic3, Msg3),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual(lists:sort([Msg1,Msg2]), lists:sort(Ack)),
-                        Dest ! stop
-                end},
-                {<<"Should have entry in ets '$erlroute_subscribers' after subscribe to specified topic globally">>,
-                    fun() ->
-                        % source
-                        Topic = <<"testmegatopic">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-
-                        erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        MS = [{
-                                #subscriber{
-                                    topic = Topic,
-                                    is_final_topic = true,
-                                    words = 'undefined',
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    sub_ref = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS)),
-
-                        % try to subscibe again (it should not create dupe)
-                        erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS))
-                end},
-                {<<"Global subscribe to specified topic and then pub test">>,
-                    fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = atom_to_binary(Module,latin1),
-                        % dest
-                        DestType = process,
-                        Self = self(),
-                        Dest = tutils:spawn_wait_loop(Self),
-                        Method = info,
-
-                        Msg1 = make_ref(),
-
-                        erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
-                        timer:sleep(5),
-                        MS = [{
-                                #subscriber{
-                                    topic = Topic,
-                                    is_final_topic = true,
-                                    words = 'undefined',
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    sub_ref = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS)),
-
-                        EtsName = erlroute:cache_table(Module),
-
-                        ?assertEqual(undefined,ets:info(EtsName)),
-
-
-                        [] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
-                        timer:sleep(5),
-
-                        ?assertNotEqual(undefined,ets:info(EtsName)),
-                        ?assertEqual(1, ets:info(EtsName, size)),
-
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg1], Ack),
-
-                        [{Dest, info}] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
-                        timer:sleep(5),
-
-                        ?assertEqual(1, ets:info(EtsName, size)),
-
-                        Ack2 = tutils:recieve_loop(),
-                        ?assertEqual([Msg1], Ack2),
-
+                        erlroute:pub(Topic, Msg1),
+                        erlroute:pub(Topic, Msg2),
+                        Received = drain(),
+                        ?assertEqual(lists:sort([Msg1, Msg2]), lists:sort(Received)),
                         Dest ! stop
                     end},
-                {<<"Global subscribe should cache existed topics (first pub then sub)">>,
+                {<<"async pub delivers message">>,
                     fun() ->
-                        % source
-                        Module = tutils:random_atom(),
-                        Topic = atom_to_binary(Module,latin1),
-                        % dest
-                        DestType = process,
-                        Self = self(),
-                        Dest = tutils:spawn_wait_loop(Self),
-                        Method = info,
-                        Msg1 = make_ref(),
-                        EtsName = erlroute:cache_table(Module),
-
-                        [] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
-
-                        % must do not present here
-                        ?assertEqual(undefined,ets:info(EtsName)),
-
-                        erlroute:sub([{topic, Topic}], {DestType, Dest, Method}),
-                        MS = [{
-                                #subscriber{
-                                    topic = Topic,
-                                    is_final_topic = true,
-                                    words = 'undefined',
-                                    dest_type = DestType,
-                                    dest = Dest,
-                                    method = Method,
-                                    sub_ref = '_'
-                                },
-                                [],
-                                [true]
-                            }],
-                        ?assertEqual(1, ets:select_count('$erlroute_subscribers', MS)),
-
-                        _ = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
-
-                        timer:sleep(5),
-
-                        ?assertNotEqual(undefined,ets:info(EtsName)),
-                        ?assertEqual(1, ets:info(EtsName, size)),
-
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg1], Ack),
-
-                        [{Dest, info}] = erlroute:pub(Module, self(), ?LINE, Topic, Msg1),
-                        timer:sleep(5),
-
-                        ?assertEqual(1, ets:info(EtsName, size)),
-
-                        Ack2 = tutils:recieve_loop(),
-                        ?assertEqual([Msg1], Ack2),
-
+                        Topic = <<"async.pub.", (rand_bin())/binary>>,
+                        Dest  = spawn_collector(self()),
+                        erlroute:sub(Topic, {process, Dest, info}),
+                        Msg = make_ref(),
+                        [] = erlroute:pub(Topic, Msg, async),
+                        timer:sleep(20),
+                        ?assertEqual([Msg], drain()),
                         Dest ! stop
+                    end},
+                {<<"function subscriber receives via cast">>,
+                    fun() ->
+                        Topic = <<"fun.sub.", (rand_bin())/binary>>,
+                        Self  = self(),
+                        erlroute:sub(Topic, fun(Payload) -> Self ! {fn, Payload} end),
+                        Msg = make_ref(),
+                        erlroute:pub(Topic, Msg),
+                        timer:sleep(20),
+                        receive {fn, Msg} -> ok
+                        after 1000 -> error(timeout_waiting_for_fn_msg)
+                        end
+                    end},
+                {<<"function subscriber with topic receives topic and payload">>,
+                    fun() ->
+                        Topic = <<"fun.topic.sub.", (rand_bin())/binary>>,
+                        Self  = self(),
+                        erlroute:sub(Topic, fun(T, P) -> Self ! {fn, T, P} end),
+                        Msg = make_ref(),
+                        erlroute:pub(Topic, Msg),
+                        timer:sleep(20),
+                        receive {fn, Topic, Msg} -> ok
+                        after 1000 -> error(timeout_waiting_for_fn_topic_msg)
+                        end
                     end}
-             ]
-         }
-     }.
-
-parse_transform_test_() ->
-    {setup,
-        fun setup_start/0,
-        {inparallel,
-             [
-                {<<"pub/1 should transform to pub/5 (in module clause) and consumer able to get message">>,
-                    fun() ->
-                        % source
-                        Module = ?MODULE,
-                        %SendTopic = <<"erlroute_tests.14">>,
-                        SubTopic = <<"erlroute_tests.14">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-
-                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
-                        Msg = make_ref(),
-                        timer:sleep(5),
-                        publish(Msg),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg], Ack),
-                        Dest ! stop
-                end},
-
-               {<<"pub/2 should transform to pub/5 (in module clause) and consumer able to get message">>,
-                   fun() ->
-                        % source
-                        Module = ?MODULE,
-                        SendTopic = <<"erlroute_tests.15">>,
-                        SubTopic = <<"erlroute_tests.15">>,
-                        % dest
-                        DestType = process,
-                        Dest = tutils:spawn_wait_loop(self()),
-                        Method = info,
-
-                        erlroute:sub([{module, Module}, {topic, SubTopic}], {DestType, Dest, Method}),
-                        Msg = make_ref(),
-                        timer:sleep(5),
-                        publish(SendTopic, Msg),
-                        Ack = tutils:recieve_loop(),
-                        ?assertEqual([Msg], Ack),
-                        Dest ! stop
-               end}
             ]
         }
     }.
-
-split_topic_test() ->
-    ?assertEqual(["*"], erlroute:split_topic(<<"*">>)),
-    ?assertEqual(["test1","test2"], erlroute:split_topic(<<"test1.test2">>)),
-    ?assertEqual(["test1","#","test2"], erlroute:split_topic(<<"test1.#.test2">>)),
-    ?assertEqual(["test1","*","test2"], erlroute:split_topic(<<"test1.*.test2">>)),
-    ?assertEqual(["test1","*"], erlroute:split_topic(<<"test1.*">>)),
-    ?assertEqual(["*","test1"], erlroute:split_topic(<<"*.test1">>)).
 
 monitor_test_() ->
     {setup,
@@ -1092,15 +250,11 @@ monitor_test_() ->
             {<<"duplicate subscribe for same pid creates exactly one monitor">>,
                 fun() ->
                     Pid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
-                    FlowSource = #flow_source{module = tutils:random_atom(), topic = <<"#">>},
-                    erlroute:sub(FlowSource, {process, Pid, info}),
-                    erlroute:sub(FlowSource, {process, Pid, info}),
+                    Topic = <<"monitor.dup.", (rand_bin())/binary>>,
+                    erlroute:sub(Topic, {process, Pid, info}),
+                    erlroute:sub(Topic, {process, Pid, info}),
                     #erlroute_state{monitors = Monitors} = sys:get_state(erlroute),
                     ?assert(maps:is_key(Pid, Monitors)),
-                    %% exactly one beam monitor (no leak from the duplicate sub)
-                    {monitors, Mons} = process_info(self(), monitors),
-                    PidMons = [P || {process, P} <- Mons, P =:= Pid],
-                    ?assertEqual([], PidMons), % our test process didn't monitor it
                     {monitored_by, Watchers} = process_info(Pid, monitored_by),
                     ?assertEqual(1, length([W || W <- Watchers, W =:= whereis(erlroute)])),
                     Pid ! stop
@@ -1108,11 +262,11 @@ monitor_test_() ->
             {<<"unsub removes monitor when no subscriptions remain">>,
                 fun() ->
                     Pid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
-                    FlowSource = #flow_source{module = tutils:random_atom(), topic = <<"#">>},
-                    erlroute:sub(FlowSource, {process, Pid, info}),
+                    Topic = <<"monitor.unsub.", (rand_bin())/binary>>,
+                    erlroute:sub(Topic, {process, Pid, info}),
                     #erlroute_state{monitors = M1} = sys:get_state(erlroute),
                     ?assert(maps:is_key(Pid, M1)),
-                    erlroute:unsub(FlowSource, {process, Pid, info}),
+                    erlroute:unsub(Topic, {process, Pid, info}),
                     #erlroute_state{monitors = M2} = sys:get_state(erlroute),
                     ?assertNot(maps:is_key(Pid, M2)),
                     {monitored_by, Watchers} = process_info(Pid, monitored_by),
@@ -1122,24 +276,21 @@ monitor_test_() ->
             {<<"unsub keeps monitor while other subscriptions for the pid remain">>,
                 fun() ->
                     Pid = spawn(fun() -> receive stop -> ok after 5000 -> ok end end),
-                    Module = tutils:random_atom(),
-                    FS1 = #flow_source{module = Module, topic = <<"t1">>},
-                    FS2 = #flow_source{module = Module, topic = <<"t2">>},
-                    erlroute:sub(FS1, {process, Pid, info}),
-                    erlroute:sub(FS2, {process, Pid, info}),
-                    erlroute:unsub(FS1, {process, Pid, info}),
+                    T1 = <<"monitor.keep.t1.", (rand_bin())/binary>>,
+                    T2 = <<"monitor.keep.t2.", (rand_bin())/binary>>,
+                    erlroute:sub(T1, {process, Pid, info}),
+                    erlroute:sub(T2, {process, Pid, info}),
+                    erlroute:unsub(T1, {process, Pid, info}),
                     #erlroute_state{monitors = M1} = sys:get_state(erlroute),
-                    ?assert(maps:is_key(Pid, M1)),   %% still has FS2 sub
-                    erlroute:unsub(FS2, {process, Pid, info}),
+                    ?assert(maps:is_key(Pid, M1)),
+                    erlroute:unsub(T2, {process, Pid, info}),
                     #erlroute_state{monitors = M2} = sys:get_state(erlroute),
-                    ?assertNot(maps:is_key(Pid, M2)), %% now fully removed
+                    ?assertNot(maps:is_key(Pid, M2)),
                     Pid ! stop
                 end}
         ]}
     }.
 
-%% Router pool: started by the app supervision tree, default size, with stable
-%% per-topic assignment spread across the pool.
 router_pool_test_() ->
     {setup,
         fun setup_start/0,
@@ -1160,12 +311,13 @@ router_pool_test_() ->
                         Topic = <<"alpha.topic">>,
                         Pid = erlroute:assign_router(Topic),
                         ?assert(is_pid(Pid)),
-                        ?assertEqual(Pid, erlroute:assign_router(Topic)),   %% sticky
+                        ?assertEqual(Pid, erlroute:assign_router(Topic)),
                         ?assert(lists:member(Pid, Pool))
                     end},
                 {<<"topics are spread round-robin across more than one router">>,
                     fun() ->
-                        Assigned = [erlroute:assign_router(integer_to_binary(N)) || N <- lists:seq(1, 200)],
+                        Assigned = [erlroute:assign_router(integer_to_binary(N))
+                                    || N <- lists:seq(1, 200)],
                         ?assert(length(lists:usort(Assigned)) > 1)
                     end}
             ]
@@ -1194,42 +346,17 @@ do_cross_node_remote_pub() ->
     end,
 
     try
-        %% Local erlroute must have learned about the peer (nodeup +
-        %% function_exported erpc check are async).
         ok = wait_for_peer_in_erlroute_nodes(PeerNode, 3000),
         _ = sys:get_state(erlroute),
 
-        %% Each publisher-side PubType travels in the envelope and
-        %% drives the remote dispatch path. Note: pub/7 with async
-        %% spawns a sync pub internally, so the envelope reaching
-        %% the remote in this case carries sync — the async handler
-        %% path is exercised by the direct envelope send below.
         run_remote_pub_variant(PeerNode, sync),
         run_remote_pub_variant(PeerNode, hybrid),
         run_remote_pub_variant(PeerNode, async),
 
-        %% Hand-crafted async envelope sent to the peer's assigned router
-        %% for the topic: ensures a pool router accepts and dispatches it.
         assert_assigned_router_dispatches_envelope(PeerNode),
-
-        %% {process, Name, cast} subscriber should route as
-        %% process_on_other_node + cast — direct dist send to the
-        %% matcher's mailbox, bypassing the remote router entirely.
         run_remote_pub_variant_process_cast(PeerNode),
-
-        %% Function subscriber → erlroute_on_other_node route addressed by
-        %% the peer's assigned router pid. Exercises the full pool path:
-        %% assignment, pid propagation, and direct-to-router publish.
         run_remote_pub_variant_function(PeerNode),
-
-        %% Two process subscribers on the peer for the same topic must flip
-        %% the publisher to a single pool route (one network send), and both
-        %% must receive exactly once.
         run_multi_process_flips_to_pool(PeerNode),
-
-        %% A process + a function subscriber on the peer for the same topic
-        %% must both be served via the single pool route, each exactly once
-        %% (no double delivery to the process).
         run_mixed_process_and_function_via_pool(PeerNode)
     catch
         Class:Reason:ST ->
@@ -1244,8 +371,6 @@ run_remote_pub_variant(PeerNode, PubType) ->
     Payload = {hello_from_local, PubType, erlang:unique_integer([positive])},
     Self    = self(),
 
-    %% Subscriber lives on the peer; forwards anything it receives
-    %% back across the dist link so the test can assert delivery.
     Forwarder = spawn(PeerNode,
         fun() ->
             erlroute:sub(Topic, {process, self(), info}),
@@ -1255,9 +380,6 @@ run_remote_pub_variant(PeerNode, PubType) ->
             end
         end),
 
-    %% Peer's sub call returns only after its erpc:multicall to us
-    %% completes, so when we see {subscribed, _} the subscribe_from_remote
-    %% is already in our mailbox.
     receive
         {subscribed, PubType} -> ok
     after 3000 ->
@@ -1265,12 +387,9 @@ run_remote_pub_variant(PeerNode, PubType) ->
         ?assertEqual({subscribed, PubType}, timeout)
     end,
 
-    %% sys:get_state flushes our erlroute mailbox so the local cache
-    %% has the cross-node subscriber registered before we publish.
     _ = sys:get_state(erlroute),
 
-    EtsName = erlroute:cache_table(?MODULE),
-    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, PubType, EtsName),
+    erlroute:pub(Topic, Payload, PubType),
 
     receive
         {peer_received, PubType, Payload} -> ok
@@ -1279,11 +398,6 @@ run_remote_pub_variant(PeerNode, PubType) ->
         ?assertEqual({peer_received, PubType, Payload}, timeout)
     end.
 
-%% Subscriber on the peer registers itself under a name and subscribes
-%% with {process, Name, cast}. The producer-side route must be
-%% process_on_other_node + cast; the published payload must arrive at
-%% the matcher wrapped in {'$gen_cast', _} (the gen_server cast
-%% envelope), proving the bypass path was taken.
 run_remote_pub_variant_process_cast(PeerNode) ->
     Topic   = <<"erlroute.crossnode.remote_pub.process_cast">>,
     Payload = {hello_cast, erlang:unique_integer([positive])},
@@ -1309,22 +423,18 @@ run_remote_pub_variant_process_cast(PeerNode) ->
 
     _ = sys:get_state(erlroute),
 
-    %% Producer-side route must be the bypass shape — not erlroute_on_other_node.
-    BypassMS = [{#remote_sub{key = {Topic, '_', PeerNode},
+    BypassMS = [{#remote_sub{topic = Topic, node = PeerNode,
                              dest_type = process_on_other_node,
                              dest = {PeerNode, RegName},
-                             method = cast,
-                             _ = '_'},
+                             method = cast},
                  [], [true]}],
     ?assertEqual(1, ets:select_count(?REMOTETS, BypassMS)),
-    RouterMS = [{#remote_sub{key = {Topic, '_', '_'},
-                             dest_type = erlroute_on_other_node,
-                             _ = '_'},
+    RouterMS = [{#remote_sub{topic = Topic, node = PeerNode,
+                             dest_type = erlroute_on_other_node, _ = '_'},
                  [], [true]}],
     ?assertEqual(0, ets:select_count(?REMOTETS, RouterMS)),
 
-    EtsName = erlroute:cache_table(?MODULE),
-    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
+    erlroute:pub(Topic, Payload),
 
     receive
         {peer_cast_received, {'$gen_cast', Payload}} -> ok
@@ -1333,9 +443,6 @@ run_remote_pub_variant_process_cast(PeerNode) ->
         ?assertEqual({peer_cast_received, {'$gen_cast', Payload}}, timeout)
     end.
 
-%% Send a hand-crafted remote_pub envelope to the peer's *assigned* router for
-%% the topic (resolved via the peer's own assign_router), and verify that pool
-%% member dispatches it to a local subscriber on the peer.
 assert_assigned_router_dispatches_envelope(PeerNode) ->
     Topic   = <<"erlroute.crossnode.remote_pub.async_envelope">>,
     Payload = {async_envelope, erlang:unique_integer([positive])},
@@ -1359,9 +466,7 @@ assert_assigned_router_dispatches_envelope(PeerNode) ->
     RouterPid = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
     ?assert(is_pid(RouterPid)),
 
-    EtsName = erlroute:cache_table(?MODULE),
-    erlang:send(RouterPid,
-                {remote_pub, ?MODULE, self(), ?LINE, Topic, Payload, async, EtsName}),
+    erlang:send(RouterPid, {remote_pub, Topic, Payload}),
 
     receive
         {peer_dispatched_async, Payload} -> ok
@@ -1370,10 +475,6 @@ assert_assigned_router_dispatches_envelope(PeerNode) ->
         ?assertEqual({peer_dispatched_async, Payload}, timeout)
     end.
 
-%% End-to-end pool path: a function subscriber on the peer becomes an
-%% erlroute_on_other_node route on the publisher, addressed by the peer's
-%% assigned router pid. Publishing locally must reach the peer's function via
-%% that router.
 run_remote_pub_variant_function(PeerNode) ->
     Topic   = <<"erlroute.crossnode.remote_pub.function">>,
     Payload = {hello_function, erlang:unique_integer([positive])},
@@ -1381,8 +482,6 @@ run_remote_pub_variant_function(PeerNode) ->
 
     Forwarder = spawn(PeerNode,
         fun() ->
-            %% Function executes on the peer (where its router runs pub);
-            %% it ships the payload back across the dist link to us.
             erlroute:sub(Topic, fun(P) -> Self ! {peer_function_received, P} end),
             Self ! function_subscribed,
             receive _ -> ok after 10000 -> ok end
@@ -1396,19 +495,15 @@ run_remote_pub_variant_function(PeerNode) ->
 
     _ = sys:get_state(erlroute),
 
-    %% Publisher-side route must be erlroute_on_other_node addressed by the
-    %% peer's assigned router pid for this topic.
     ExpectedRouter = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
     ?assert(is_pid(ExpectedRouter)),
-    RouteMS = [{#remote_sub{key = {Topic, '_', PeerNode},
+    RouteMS = [{#remote_sub{topic = Topic, node = PeerNode,
                             dest_type = erlroute_on_other_node,
-                            dest = {PeerNode, ExpectedRouter},
-                            _ = '_'},
+                            dest = {PeerNode, ExpectedRouter}, _ = '_'},
                 [], [true]}],
     ?assertEqual(1, ets:select_count(?REMOTETS, RouteMS)),
 
-    EtsName = erlroute:cache_table(?MODULE),
-    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
+    erlroute:pub(Topic, Payload),
 
     receive
         {peer_function_received, Payload} -> ok
@@ -1417,23 +512,16 @@ run_remote_pub_variant_function(PeerNode) ->
         ?assertEqual({peer_function_received, Payload}, timeout)
     end.
 
-%% Spawn a peer process that subscribes itself to Topic as {process, self,
-%% Method}, then reports the first message it gets plus whether a second
-%% (duplicate) arrives shortly after. Returns its pid.
 spawn_peer_process_subscriber(PeerNode, Topic, Method, Tag, ReportTo) ->
     spawn(PeerNode,
         fun() ->
             erlroute:sub(Topic, {process, self(), Method}),
             ReportTo ! {peer_subscribed, Tag},
             First = receive M -> M after 10000 -> none end,
-            %% if direct + pool routes coexisted we'd get a duplicate here
             Extra = receive M2 -> {extra, M2} after 500 -> no_extra end,
             ReportTo ! {peer_got, Tag, First, Extra}
         end).
 
-%% Two distinct process subscribers on the peer for one topic: the publisher
-%% must collapse to a single pool route (one send over the wire), and both
-%% subscribers must receive the payload exactly once.
 run_multi_process_flips_to_pool(PeerNode) ->
     Topic   = <<"erlroute.crossnode.multi_process">>,
     Payload = {multi_proc, erlang:unique_integer([positive])},
@@ -1447,25 +535,22 @@ run_multi_process_flips_to_pool(PeerNode) ->
     receive {peer_subscribed, p2} -> ok after 3000 -> erlang:error(p2_subscribe_timeout) end,
     _ = sys:get_state(erlroute),
 
-    %% Publisher-side: exactly one pool route to the peer, no direct routes.
-    PoolMS = [{#remote_sub{key = {Topic, '_', PeerNode}, dest_type = erlroute_on_other_node, _ = '_'},
+    PoolMS = [{#remote_sub{topic = Topic, node = PeerNode,
+                           dest_type = erlroute_on_other_node, _ = '_'},
                [], [true]}],
-    DirectMS = [{#remote_sub{key = {Topic, '_', PeerNode}, dest_type = process_on_other_node, _ = '_'},
+    DirectMS = [{#remote_sub{topic = Topic, node = PeerNode,
+                             dest_type = process_on_other_node, _ = '_'},
                  [], [true]}],
     ?assertEqual(1, ets:select_count(?REMOTETS, PoolMS)),
     ?assertEqual(0, ets:select_count(?REMOTETS, DirectMS)),
 
-    EtsName = erlroute:cache_table(?MODULE),
-    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
+    erlroute:pub(Topic, Payload),
 
     assert_peer_got_once(p1, Payload),
     assert_peer_got_once(p2, Payload),
     catch exit(P1, kill),
     catch exit(P2, kill).
 
-%% A process subscriber and a function subscriber on the peer for one topic:
-%% both served by the single pool route, each exactly once (the process must
-%% not also get a direct copy).
 run_mixed_process_and_function_via_pool(PeerNode) ->
     Topic   = <<"erlroute.crossnode.mixed">>,
     Payload = {mixed, erlang:unique_integer([positive])},
@@ -1484,16 +569,16 @@ run_mixed_process_and_function_via_pool(PeerNode) ->
     receive {peer_subscribed, mixed_fun} -> ok after 3000 -> erlang:error(mixed_fun_timeout) end,
     _ = sys:get_state(erlroute),
 
-    %% Mixed subscribers force the pool route; no direct route to the process.
-    PoolMS = [{#remote_sub{key = {Topic, '_', PeerNode}, dest_type = erlroute_on_other_node, _ = '_'},
+    PoolMS = [{#remote_sub{topic = Topic, node = PeerNode,
+                           dest_type = erlroute_on_other_node, _ = '_'},
                [], [true]}],
-    DirectMS = [{#remote_sub{key = {Topic, '_', PeerNode}, dest_type = process_on_other_node, _ = '_'},
+    DirectMS = [{#remote_sub{topic = Topic, node = PeerNode,
+                             dest_type = process_on_other_node, _ = '_'},
                  [], [true]}],
     ?assertEqual(1, ets:select_count(?REMOTETS, PoolMS)),
     ?assertEqual(0, ets:select_count(?REMOTETS, DirectMS)),
 
-    EtsName = erlroute:cache_table(?MODULE),
-    erlroute:pub(?MODULE, self(), ?LINE, Topic, Payload, hybrid, EtsName),
+    erlroute:pub(Topic, Payload),
 
     assert_peer_got_once(mixed_proc, Payload),
     assert_peer_got_once(mixed_fun, Payload),
@@ -1509,18 +594,8 @@ assert_peer_got_once(Tag, Payload) ->
         ?assertEqual({peer_got, Tag, Payload}, timeout)
     end.
 
-%% Multi-node (3 nodes, full mesh): one publish must reach each subscriber
-%% exactly once. Guards against a node re-forwarding a remote_pub to its own
-%% cross-node routes (duplicate delivery). Driven by cross_node_test_/0.
 do_cross_node_multi_node_no_dup() ->
-    %% Keep the controller out of the erlroute mesh: with it running, the
-    %% fresh peers pull its accumulated subscriptions from earlier tests on
-    %% join, which perturbs dispatch and hides the bug. A clean 3-peer mesh
-    %% is the faithful reproduction.
     _ = application:stop(erlroute),
-    %% Three fresh peers in a full mesh; publish from one of them. (Publishing
-    %% from the test/controller node hides the bug — its cache carries state
-    %% from earlier tests.)
     {ok, PeerA, NodeA} = start_erlroute_peer("erlroute_mn_a"),
     {ok, PeerB, NodeB} = start_erlroute_peer("erlroute_mn_b"),
     {ok, PeerC, NodeC} = start_erlroute_peer("erlroute_mn_c"),
@@ -1533,22 +608,14 @@ do_cross_node_multi_node_no_dup() ->
     try
         ok = wait_erlroute_mesh(Nodes, 8000),
 
-        %% Every node has one function subscriber for the topic. Each reports
-        %% a tagged hit so we can count deliveries per node.
         Forwarders = [subscribe_reporter(N, Topic, Tag, Self)
                       || {N, Tag} <- [{NodeA, a}, {NodeB, b}, {NodeC, c}]],
 
-        %% Each node should now hold a route to each of the other two.
         ok = wait_remote_route_count(Nodes, Topic, 2, 8000),
 
-        %% Publish ONCE from a peer.
         _ = rpc:call(NodeA, erlroute, pub,
-                     [?MODULE, mn_publisher, ?LINE, Topic,
-                      {mn_payload, erlang:unique_integer([positive])},
-                      hybrid, erlroute:cache_table(?MODULE)]),
+                     [Topic, {mn_payload, erlang:unique_integer([positive])}]),
 
-        %% Capped: a re-forward storm trips the cap and fails the assertion
-        %% instead of hanging the suite.
         Hits = collect_tagged_hits(#{}, 20),
         [catch exit(F, kill) || F <- Forwarders],
         StopPeers(),
@@ -1563,7 +630,7 @@ do_cross_node_multi_node_no_dup() ->
 
 setup_distribution() ->
     case is_alive() of
-        true  -> {false, false};    % runner already distributed — touch nothing
+        true  -> {false, false};
         false ->
             StartedEpmd = case epmd_running() of
                 true  -> false;
@@ -1574,20 +641,17 @@ setup_distribution() ->
             {StartedEpmd, true}
     end.
 
-%% Revert exactly what setup_distribution/0 started — and nothing it didn't.
 teardown_distribution({StartedEpmd, StartedNetKernel}) ->
     _ = case StartedNetKernel of
-        true  -> net_kernel:stop();     % back to nonode@nohost; unregisters us from epmd
+        true  -> net_kernel:stop();
         false -> ok
     end,
     _ = case StartedEpmd of
-        true  -> os:cmd("epmd -kill");  % only the epmd WE spawned (refuses if live nodes remain)
+        true  -> os:cmd("epmd -kill");
         false -> ok
     end,
     ok.
 
-%% True if a local epmd is already accepting connections (queried without
-%% needing distribution to be up).
 epmd_running() ->
     case net_adm:names() of
         {ok, _}    -> true;
@@ -1596,7 +660,6 @@ epmd_running() ->
 
 start_erlroute_peer(Prefix) ->
     Name = list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive]))),
-    %% standard_io: avoids peer→controller dist-link (Mac shortnames not DNS-resolvable).
     {ok, Peer, Node} = peer:start_link(#{name => Name, host => "localhost",
                                          connection => standard_io,
                                          args => ["-setcookie", atom_to_list(erlang:get_cookie())]}),
@@ -1633,7 +696,7 @@ wait_erlroute_mesh(Nodes, Timeout) ->
 wait_remote_route_count(_Nodes, _Topic, _Expected, Timeout) when Timeout =< 0 ->
     erlang:error(remote_routes_not_ready);
 wait_remote_route_count(Nodes, Topic, Expected, Timeout) ->
-    MS = [{#remote_sub{key = {Topic, '_', '_'}, dest_type = erlroute_on_other_node, _ = '_'}, [], [true]}],
+    MS = [{#remote_sub{topic = Topic, dest_type = erlroute_on_other_node, _ = '_'}, [], [true]}],
     Ready = lists:all(fun(N) ->
         rpc:call(N, ets, select_count, [?REMOTETS, MS]) =:= Expected
     end, Nodes),
@@ -1644,21 +707,16 @@ wait_remote_route_count(Nodes, Topic, Expected, Timeout) ->
 
 collect_tagged_hits(Acc, Cap) ->
     case lists:sum(maps:values(Acc)) >= Cap of
-        true ->
-            Acc;
+        true -> Acc;
         false ->
             receive
                 {mn_hit, Tag} ->
-                    collect_tagged_hits(maps:update_with(Tag, fun(X) -> X + 1 end, 1, Acc), Cap)
+                    collect_tagged_hits(maps:update_with(Tag, fun(X) -> X+1 end, 1, Acc), Cap)
             after 1000 ->
                 Acc
             end
     end.
 
-%% Symmetric node discovery: when a peer's erlroute starts after the dist
-%% link is up (so the controller's nodeup check raced ahead of the peer
-%% loading erlroute), both nodes must still end up knowing each other — no
-%% manual nudging. Driven by cross_node_test_/0.
 do_cross_node_symmetric_discovery() ->
     {ok, _} = application:ensure_all_started(erlroute),
     {ok, Peer, PeerNode} = start_erlroute_peer("erlroute_disc"),
@@ -1683,8 +741,6 @@ do_cross_node_discovery_settles() ->
     {ok, PeerB, NodeB} = start_erlroute_peer("erlroute_settle_b"),
     {ok, PeerC, NodeC} = start_erlroute_peer("erlroute_settle_c"),
     Nodes = [node(), NodeB, NodeC],
-    %% One counting tracer per node, local to that node, watching its own
-    %% erlroute process' control-plane receives.
     Tracers = [start_control_tracer(N) || N <- Nodes],
     StopAll = fun() ->
         _ = [catch (T ! stop) || T <- Tracers],
@@ -1694,14 +750,8 @@ do_cross_node_discovery_settles() ->
     end,
     try
         ok = wait_erlroute_mesh(Nodes, 8000),
-        %% Propagation churn: a live subscriber on every node for two shared
-        %% topics, so descriptors are computed and broadcast to peers.
         _ = [subscribe_quiet(N, T)
              || N <- Nodes, T <- [<<"erlroute.settle.t1">>, <<"erlroute.settle.t2">>]],
-        %% The aggregate control-message count must reach a fixed point and
-        %% hold it for StableMs. Cap is far above the expected handshake +
-        %% churn volume (~tens of messages) yet far below what a loop emits
-        %% in a single poll interval.
         Stable = wait_count_stable(Tracers, 1500, 300, 15000),
         ?assert(Stable > 0),
         ?assert(Stable < 300)
@@ -1713,8 +763,6 @@ do_cross_node_discovery_settles() ->
     StopAll(),
     ok.
 
-%% Spawn a counting tracer ON Node (so it is local to the traced erlroute)
-%% and attach it to erlroute's 'receive' events.
 start_control_tracer(Node) ->
     Tracer = spawn(Node, fun() -> control_tracer_loop(0) end),
     Pid = rpc:call(Node, erlang, whereis, [erlroute]),
@@ -1728,9 +776,8 @@ control_tracer_loop(Count) ->
         {trace, _P, 'receive', {set_remote_route, _, _, _}} -> control_tracer_loop(Count + 1);
         {trace, _P, 'receive', {remove_remote_route, _, _}} -> control_tracer_loop(Count + 1);
         {trace, _P, 'receive', _}                           -> control_tracer_loop(Count);
-        {count, From}                                       -> From ! {control_count, self(), Count},
-                                                               control_tracer_loop(Count);
-        stop                                                -> ok
+        {count, From} -> From ! {control_count, self(), Count}, control_tracer_loop(Count);
+        stop          -> ok
     end.
 
 subscribe_quiet(Node, Topic) ->
@@ -1745,9 +792,6 @@ sum_control_counts(Tracers) ->
         receive {control_count, T, K} -> K after 3000 -> erlang:error({control_count_timeout, T}) end
     end, Tracers)).
 
-%% Poll the aggregate control-message count until it stays unchanged for
-%% StableMs. Error if it ever exceeds Cap (endless loop) or fails to settle
-%% within Budget.
 wait_count_stable(Tracers, StableMs, Cap, Budget) ->
     wait_count_stable(Tracers, StableMs, Cap, Budget, -1, StableMs).
 
@@ -1784,11 +828,8 @@ wait_for_peer_in_erlroute_nodes(PeerNode, Timeout) when Timeout =< 0 ->
 wait_for_peer_in_erlroute_nodes(PeerNode, Timeout) ->
     #erlroute_state{erlroute_nodes = Nodes} = sys:get_state(erlroute),
     case lists:member(PeerNode, Nodes) of
-        true ->
-            ok;
-        false ->
-            timer:sleep(50),
-            wait_for_peer_in_erlroute_nodes(PeerNode, Timeout - 50)
+        true  -> ok;
+        false -> timer:sleep(50), wait_for_peer_in_erlroute_nodes(PeerNode, Timeout - 50)
     end.
 
 setup_start() ->
@@ -1804,3 +845,20 @@ cleanup(_) ->
     ok.
 
 start_server() -> application:ensure_started(?TESTSERVER).
+
+rand_bin() -> integer_to_binary(erlang:unique_integer([positive])).
+
+spawn_collector(Parent) ->
+    spawn(fun() -> collector_loop(Parent) end).
+
+collector_loop(Parent) ->
+    receive
+        stop -> ok;
+        Msg  -> Parent ! {fwd, Msg}, collector_loop(Parent)
+    end.
+
+drain() ->
+    receive
+        {fwd, Data} -> [Data | drain()]
+    after 50 -> []
+    end.

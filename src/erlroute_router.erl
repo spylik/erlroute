@@ -35,10 +35,9 @@ init(Parent) ->
 
 loop() ->
     receive
-        {remote_pub, Module, Process, Line, Topic, Payload, _PubType, EtsName} ->
-            %% local-only: deliver to this node's subscribers, never re-forward
+        {remote_pub, Topic, Payload} ->
             _ = try
-                erlroute:pub_local(Module, Process, Line, Topic, Payload, EtsName)
+                erlroute:pub_local(Topic, Payload)
             catch
                 Class:Reason:St ->
                     error_logger:error_msg(
