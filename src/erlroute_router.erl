@@ -35,16 +35,23 @@ init(Parent) ->
 
 loop() ->
     receive
-        {remote_pub, Topic, Payload} ->
-            _ = try
-                erlroute:pub_local(Topic, Payload)
-            catch
-                Class:Reason:St ->
+        {remote_pub, async, Topic, Payload} ->
+            spawn(fun() ->
+                _ = try erlroute:pub_local(Topic, Payload)
+                    catch Class:Reason:St ->
+                        error_logger:error_msg(
+                            "erlroute_router dispatch failed for topic ~p: ~p:~p~n~p~n",
+                            [Topic, Class, Reason, St])
+                    end
+            end),
+            loop();
+        {remote_pub, sync, Topic, Payload} ->
+            _ = try erlroute:pub_local(Topic, Payload)
+                catch Class:Reason:St ->
                     error_logger:error_msg(
                         "erlroute_router dispatch failed for topic ~p: ~p:~p~n~p~n",
-                        [Topic, Class, Reason, St]
-                    )
-            end,
+                        [Topic, Class, Reason, St])
+                end,
             loop();
         Msg ->
             error_logger:warning_msg("erlroute_router received unexpected message ~p~n", [Msg]),

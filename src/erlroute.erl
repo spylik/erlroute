@@ -12,6 +12,7 @@
 -endif.
 
 -define(SUBETS, '$erlroute_subscribers').
+-define(PIDETS,  '$erlroute_pid_index').
 -define(ROUTERETS, '$erlroute_routers').
 
 -define(DEFAULT_TIMEOUT_FOR_RPC, 1000).
@@ -67,7 +68,9 @@ stop(async) -> gen_server:cast(?SERVER, stop).
 init([]) ->
     process_flag(trap_exit, true),
     % set table: {Topic :: topic(), Subs :: [sub_spec()]}
-    _ = ets:new(?SUBETS, [set, public, {read_concurrency, true}, named_table]),
+    _ = ets:new(?SUBETS,   [set, public, {read_concurrency, true}, named_table]),
+    % bag table: {Pid :: pid(), Topic :: topic()} — reverse index for pid-cleanup
+    _ = ets:new(?PIDETS,   [bag, public, {read_concurrency, true}, named_table]),
     _ = ets:new(?ROUTERETS, [set, public, named_table, {read_concurrency, true}]),
     % bag table keyed by #remote_sub.topic
     _ = ets:new(?REMOTETS, [bag, public, named_table, {read_concurrency, true},
@@ -196,7 +199,7 @@ router_pids() ->
     try ets:lookup_element(?ROUTERETS, '$routers', 2) of
         Routers -> tuple_to_list(Routers)
     catch
-        _:_ -> []
+        error:badarg -> []
     end.
 
 -spec stop_routers(Routers :: [pid()]) -> ok.
@@ -222,7 +225,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 -spec pub(Topic, Payload) -> pub_result() when Topic :: topic(), Payload :: payload().
 
 pub(Topic, Payload) ->
-    do_pub(Topic, Payload, all).
+    do_pub(Topic, Payload, all, sync).
 
 -spec pub(Topic, Payload, PubType) -> pub_result() when
     Topic   :: topic(),
@@ -230,22 +233,22 @@ pub(Topic, Payload) ->
     PubType :: pub_type().
 
 pub(Topic, Payload, async) ->
-    spawn(fun() -> do_pub(Topic, Payload, all) end),
+    spawn(fun() -> do_pub(Topic, Payload, all, async) end),
     [];
 
-pub(Topic, Payload, _PubType) ->
-    do_pub(Topic, Payload, all).
+pub(Topic, Payload, sync) ->
+    do_pub(Topic, Payload, all, sync).
 
 -spec pub_local(Topic, Payload) -> pub_result() when
     Topic   :: topic(),
     Payload :: payload().
 
 pub_local(Topic, Payload) ->
-    do_pub(Topic, Payload, local).
+    do_pub(Topic, Payload, local, sync).
 
--spec do_pub(topic(), payload(), scope()) -> pub_result().
+-spec do_pub(topic(), payload(), scope(), pub_type()) -> pub_result().
 
-do_pub(Topic, Payload, Scope) ->
+do_pub(Topic, Payload, Scope, PubType) ->
     LocalSubs = case ets:lookup(?SUBETS, Topic) of
         [{Topic, Subs}] -> Subs;
         []              -> []
@@ -253,7 +256,7 @@ do_pub(Topic, Payload, Scope) ->
     R1 = deliver(LocalSubs, Payload, Topic, []),
     R2 = case Scope of
         local -> [];
-        all   -> deliver_remote(ets:lookup(?REMOTETS, Topic), Payload, Topic, [])
+        all   -> deliver_remote(ets:lookup(?REMOTETS, Topic), Payload, Topic, PubType, [])
     end,
     R1 ++ R2.
 
@@ -328,63 +331,64 @@ deliver([{function, {Function, ShallIncludeTopic} = Dest, Method} | T], Payload,
     end,
     deliver(T, Payload, Topic, [{Dest, Method} | Acc]).
 
--spec deliver_remote(RemoteSubs, Payload, Topic, Acc) -> pub_result() when
+-spec deliver_remote(RemoteSubs, Payload, Topic, PubType, Acc) -> pub_result() when
     RemoteSubs  :: [#remote_sub{}],
     Payload     :: payload(),
     Topic       :: topic(),
+    PubType     :: pub_type(),
     Acc         :: pub_result().
 
-deliver_remote([], _Payload, _Topic, Acc) ->
+deliver_remote([], _Payload, _Topic, _PubType, Acc) ->
     Acc;
 
 deliver_remote([#remote_sub{dest_type = erlroute_on_other_node,
                             dest      = {_Node, RouterPid} = Dest,
                             method    = Method} | T],
-               Payload, Topic, Acc) ->
-    erlang:send(RouterPid, {remote_pub, Topic, Payload}),
-    deliver_remote(T, Payload, Topic, [{Dest, Method} | Acc]);
+               Payload, Topic, PubType, Acc) ->
+    erlang:send(RouterPid, {remote_pub, PubType, Topic, Payload}),
+    deliver_remote(T, Payload, Topic, PubType, [{Dest, Method} | Acc]);
 
 deliver_remote([#remote_sub{dest_type = process_on_other_node,
                             dest      = {_Node, Proc} = Dest,
                             method    = info} | T],
-               Payload, Topic, Acc) when is_pid(Proc) ->
+               Payload, Topic, PubType, Acc) when is_pid(Proc) ->
     erlang:send(Proc, Payload),
-    deliver_remote(T, Payload, Topic, [{Dest, info} | Acc]);
+    deliver_remote(T, Payload, Topic, PubType, [{Dest, info} | Acc]);
 
 deliver_remote([#remote_sub{dest_type = process_on_other_node,
                             dest      = {Node, Proc} = Dest,
                             method    = info} | T],
-               Payload, Topic, Acc) when is_atom(Proc) ->
+               Payload, Topic, PubType, Acc) when is_atom(Proc) ->
     erlang:send({Proc, Node}, Payload),
-    deliver_remote(T, Payload, Topic, [{Dest, info} | Acc]);
+    deliver_remote(T, Payload, Topic, PubType, [{Dest, info} | Acc]);
 
 deliver_remote([#remote_sub{dest_type = process_on_other_node,
                             dest      = {_Node, Proc} = Dest,
                             method    = cast} | T],
-               Payload, Topic, Acc) when is_pid(Proc) ->
+               Payload, Topic, PubType, Acc) when is_pid(Proc) ->
     erlang:send(Proc, {'$gen_cast', Payload}),
-    deliver_remote(T, Payload, Topic, [{Dest, cast} | Acc]);
+    deliver_remote(T, Payload, Topic, PubType, [{Dest, cast} | Acc]);
 
 deliver_remote([#remote_sub{dest_type = process_on_other_node,
                             dest      = {Node, Proc} = Dest,
                             method    = cast} | T],
-               Payload, Topic, Acc) when is_atom(Proc) ->
+               Payload, Topic, PubType, Acc) when is_atom(Proc) ->
     erlang:send({Proc, Node}, {'$gen_cast', Payload}),
-    deliver_remote(T, Payload, Topic, [{Dest, cast} | Acc]);
+    deliver_remote(T, Payload, Topic, PubType, [{Dest, cast} | Acc]);
 
 deliver_remote([#remote_sub{dest_type = process_on_other_node,
                             dest      = {_Node, Proc} = Dest,
                             method    = call} | T],
-               Payload, Topic, Acc) when is_pid(Proc) ->
+               Payload, Topic, PubType, Acc) when is_pid(Proc) ->
     catch gen_server:call(Proc, Payload),
-    deliver_remote(T, Payload, Topic, [{Dest, call} | Acc]);
+    deliver_remote(T, Payload, Topic, PubType, [{Dest, call} | Acc]);
 
 deliver_remote([#remote_sub{dest_type = process_on_other_node,
                             dest      = {Node, Proc} = Dest,
                             method    = call} | T],
-               Payload, Topic, Acc) when is_atom(Proc) ->
+               Payload, Topic, PubType, Acc) when is_atom(Proc) ->
     catch gen_server:call({Proc, Node}, Payload),
-    deliver_remote(T, Payload, Topic, [{Dest, call} | Acc]).
+    deliver_remote(T, Payload, Topic, PubType, [{Dest, call} | Acc]).
 
 % ================================ end of pub part =============================
 % ----------------------------------- sub part ---------------------------------
@@ -433,9 +437,18 @@ subscribe(Topic, {DestType, Dest, Method}) ->
         []              -> []
     end,
     case lists:member(SubSpec, Current) of
-        false -> ets:insert(?SUBETS, {Topic, [SubSpec | Current]});
+        false ->
+            _ = ets:insert(?SUBETS, {Topic, [SubSpec | Current]}),
+            maybe_index_pid(DestType, Dest, Topic);
         true  -> ok
     end.
+
+-spec maybe_index_pid(dest_type(), dest(), topic()) -> ok.
+
+maybe_index_pid(process, Pid, Topic) when is_pid(Pid) ->
+    _ = ets:insert(?PIDETS, {Pid, Topic}),  % bag; identical tuple silently dropped
+    ok;
+maybe_index_pid(_, _, _) -> ok.
 
 % ================================ end of sub part =============================
 % ---------------------------------- unsub part --------------------------------
@@ -444,7 +457,11 @@ subscribe(Topic, {DestType, Dest, Method}) ->
     Target :: topic().
 
 unsub(Topic) when is_binary(Topic) ->
-    unsub(Topic, {process, self(), info}).
+    unsub(Topic, {process, self(), info}),
+    case erlang:process_info(self(), registered_name) of
+        {registered_name, Name} -> unsub(Topic, {process, Name, info});
+        []                      -> ok
+    end.
 
 -spec unsub(Topic, FlowDest) -> ok when
     Topic    :: topic(),
@@ -481,31 +498,48 @@ delete_local_subscriber(Topic, {DestType, Dest, Method}) ->
     SubSpec = {DestType, Dest, Method},
     case ets:lookup(?SUBETS, Topic) of
         [{Topic, Subs}] ->
-            case lists:delete(SubSpec, Subs) of
-                []      -> ets:delete(?SUBETS, Topic);
-                NewSubs -> ets:insert(?SUBETS, {Topic, NewSubs})
-            end;
+            NewSubs = lists:delete(SubSpec, Subs),
+            case NewSubs of
+                []  -> ets:delete(?SUBETS, Topic);
+                _   -> _ = ets:insert(?SUBETS, {Topic, NewSubs})
+            end,
+            maybe_unindex_pid(DestType, Dest, Topic, NewSubs);
         [] -> ok
     end.
+
+-spec maybe_unindex_pid(dest_type(), dest(), topic(), [sub_spec()]) -> ok.
+
+maybe_unindex_pid(process, Pid, Topic, RemainingSubs) when is_pid(Pid) ->
+    case lists:any(fun({process, P, _}) -> P =:= Pid; (_) -> false end, RemainingSubs) of
+        false -> _ = ets:delete_object(?PIDETS, {Pid, Topic}), ok;
+        true  -> ok
+    end;
+maybe_unindex_pid(_, _, _, _) -> ok.
 
 -spec delete_local_process(Pid) -> ok when Pid :: pid().
 
 delete_local_process(Pid) ->
+    Topics = [T || {_, T} <- ets:lookup(?PIDETS, Pid)],
     IsPidSub = fun({process, P, _}) -> P =:= Pid; (_) -> false end,
-    lists:foreach(fun({Topic, Subs}) ->
-        case [S || S <- Subs, not IsPidSub(S)] of
-            []      -> ets:delete(?SUBETS, Topic);
-            NewSubs -> ets:insert(?SUBETS, {Topic, NewSubs})
+    lists:foreach(fun(Topic) ->
+        case ets:lookup(?SUBETS, Topic) of
+            [{Topic, Subs}] ->
+                case [S || S <- Subs, not IsPidSub(S)] of
+                    []      -> ets:delete(?SUBETS, Topic);
+                    NewSubs -> _ = ets:insert(?SUBETS, {Topic, NewSubs})
+                end;
+            [] -> ok
         end
-    end, ets:tab2list(?SUBETS)).
+    end, Topics),
+    _ = ets:delete(?PIDETS, Pid),
+    ok.
 
 -spec unsubscribe_local_pid(Pid, ErlRouteNodes) -> ok when
     Pid             :: pid(),
     ErlRouteNodes   :: [node()].
 
 unsubscribe_local_pid(Pid, ErlRouteNodes) ->
-    IsPidSub = fun({process, P, _}) -> P =:= Pid; (_) -> false end,
-    Affected = [T || {T, Subs} <- ets:tab2list(?SUBETS), lists:any(IsPidSub, Subs)],
+    Affected = [T || {_, T} <- ets:lookup(?PIDETS, Pid)],
     Befores = [{T, delivery_descriptor(T)} || T <- Affected],
     delete_local_process(Pid),
     lists:foreach(fun({T, Before}) ->
@@ -623,9 +657,9 @@ delivery_descriptor(Topic) ->
     Subs  :: [sub_spec()],
     Topic :: topic().
 
-descriptor_from_subs([], _Topic)                          -> none;
-descriptor_from_subs([{process, Proc, Method}], _Topic)   -> {direct, Proc, Method};
-descriptor_from_subs(_MultipleOrMixed, Topic)             -> {pool, assign_router(Topic)}.
+descriptor_from_subs([], _Topic)                        -> none;
+descriptor_from_subs([{process, Proc, Method}], _Topic) -> {direct, Proc, Method};
+descriptor_from_subs(_MultipleOrMixed, Topic)           -> {pool, assign_router(Topic)}.
 
 -spec local_descriptors() -> [{topic(), delivery_descriptor()}].
 
@@ -697,12 +731,9 @@ may_establish_monitor(_NotMatch, Monitors) -> Monitors.
     Monitors :: #{pid() => reference()}.
 
 may_release_monitor({process, Proc, _Method}, Monitors) when is_pid(Proc) ->
-    IsPidSub = fun({process, P, _}) -> P =:= Proc; (_) -> false end,
-    HasSub = lists:any(fun({_T, Subs}) -> lists:any(IsPidSub, Subs) end,
-                       ets:tab2list(?SUBETS)),
-    case HasSub of
-        true  -> Monitors;
-        false ->
+    case ets:lookup(?PIDETS, Proc) of
+        [_ | _] -> Monitors;
+        [] ->
             case maps:take(Proc, Monitors) of
                 {Ref, NewMonitors} -> erlang:demonitor(Ref, [flush]), NewMonitors;
                 error              -> Monitors

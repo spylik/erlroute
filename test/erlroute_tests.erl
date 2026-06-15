@@ -350,7 +350,6 @@ do_cross_node_remote_pub() ->
         _ = sys:get_state(erlroute),
 
         run_remote_pub_variant(PeerNode, sync),
-        run_remote_pub_variant(PeerNode, hybrid),
         run_remote_pub_variant(PeerNode, async),
 
         assert_assigned_router_dispatches_envelope(PeerNode),
@@ -466,7 +465,7 @@ assert_assigned_router_dispatches_envelope(PeerNode) ->
     RouterPid = rpc:call(PeerNode, erlroute, assign_router, [Topic]),
     ?assert(is_pid(RouterPid)),
 
-    erlang:send(RouterPid, {remote_pub, Topic, Payload}),
+    erlang:send(RouterPid, {remote_pub, sync, Topic, Payload}),
 
     receive
         {peer_dispatched_async, Payload} -> ok
