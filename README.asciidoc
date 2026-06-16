@@ -1,58 +1,45 @@
 = Erlroute
 
-Erlroute is a pub/sub routing library for Erlang/OTP. Publishers emit messages tagged with a topic and the calling module; subscribers register destinations that receive those messages. The routing table lives in ETS so the hot path (cached routes) is a single ETS lookup with no gen_server round-trip.
+Erlroute is a pub/sub routing library for Erlang/OTP. Publishers emit messages tagged with a binary topic; subscribers register local or remote destinations that receive those messages. The subscription table lives in ETS so the hot publish path is a single ETS lookup with no gen_server round-trip.
 
 == Quick start
 
 [source,erlang]
 ----
-%% Subscribe the current process to all messages from module my_producer
-erlroute:sub(my_producer).
-
-%% Subscribe to a specific topic from any module
+%% Subscribe the current process (info delivery)
 erlroute:sub(<<"sensor.temperature">>).
 
-%% Publish from inside my_producer — routing is a single ETS read after the first call
-erlroute:pub(?MODULE, self(), ?LINE, <<"sensor.temperature">>, Reading).
+%% Publish
+erlroute:pub(<<"sensor.temperature">>, Reading).
 ----
 
-== Topics and source matching
+== Subscribe
 
-A topic is any binary string. A subscriber can filter by topic, by the publishing module, or both:
-
-[source,erlang]
-----
-%% Any module, specific topic
-erlroute:sub(<<"sensor.temperature">>, self()).
-
-%% Specific module, any topic (wildcard <<"#">>)
-erlroute:sub(my_producer, self()).
-
-%% Both — specific module + specific topic
-erlroute:sub([{module, my_producer}, {topic, <<"sensor.temperature">>}], self()).
-----
-
-The wildcard topic `<<"#">>` matches all published topics. It is the implicit topic when you subscribe to a module by atom.
-
-== Delivery destinations
+`sub/1` subscribes the calling process with default `info` (plain send) delivery.
+`sub/2` accepts a destination as the second argument.
 
 === Process (pid or registered name)
 
 [source,erlang]
 ----
-%% Current process, default `info` delivery (plain message send)
+%% Current process, info delivery
+erlroute:sub(<<"events">>).
 erlroute:sub(<<"events">>, self()).
+
+%% Registered name, info delivery
+erlroute:sub(<<"events">>, my_worker).
 
 %% Registered name, cast delivery
 erlroute:sub(<<"events">>, {process, my_worker, cast}).
 
-%% Registered name, call delivery (blocks the pub call)
+%% Registered name, call delivery
 erlroute:sub(<<"events">>, {process, my_worker, call}).
 ----
 
 === Anonymous function
 
-The function receives the payload only (arity 1) or topic + payload (arity 2):
+The function receives the payload only (arity 1) or topic + payload (arity 2).
+Delivery is always `cast` (spawned):
 
 [source,erlang]
 ----
@@ -64,9 +51,11 @@ erlroute:sub(<<"events">>, fun(Topic, Payload) -> ... end).
 
 [source,erlang]
 ----
-%% Calls my_handler:on_event(Payload, ExtraArg) on publish
+%% Calls my_handler:on_event(Payload, ExtraArg)
 erlroute:sub(<<"events">>, {my_handler, on_event, [ExtraArg]}).
 ----
+
+Erlroute checks the function's arity at subscribe time and automatically prepends `Topic` when the function accepts it (arity `length(Args) + 2` vs `length(Args) + 1`).
 
 === Function or MFA on a remote node
 
@@ -80,76 +69,71 @@ erlroute:sub(<<"events">>, {remote_node@host, {my_handler, on_event, []}}).
 
 [source,erlang]
 ----
-erlroute:unsub(<<"events">>, self()).
-erlroute:unsub(my_producer, self()).
+%% Unsubscribes self() with info delivery (and registered name if the process has one)
+erlroute:unsub(<<"events">>).
+
+%% Unsubscribe a specific destination — same shape as sub/2
+erlroute:unsub(<<"events">>, my_worker).
+erlroute:unsub(<<"events">>, {process, my_worker, cast}).
+erlroute:unsub(<<"events">>, fun(P) -> ... end).
 ----
 
-Process subscriptions added via pid are cleaned up automatically when the process dies.
+`unsub/1` removes both the pid-based and name-based subscriptions for the calling process. Pid subscriptions are also cleaned up automatically when the subscribed process exits.
 
-== Publish modes
+== Publish
+
+[source,erlang]
+----
+%% Sync — delivers to all subscribers, returns [{Dest, Method}]
+erlroute:pub(<<"events">>, Payload).
+erlroute:pub(<<"events">>, Payload, sync).
+
+%% Async — spawns delivery, returns [] immediately
+erlroute:pub(<<"events">>, Payload, async).
+
+%% Local only — skips cross-node delivery
+erlroute:pub_local(<<"events">>, Payload).
+----
 
 [cols="1,3"]
 |===
 | Mode | Behaviour
 
-| `sync`
-| Delivers to all known subscribers before returning. Returns `[{Dest, Method}]`.
+| `sync` (default)
+| Delivers to all local subscribers and dispatches to remote router pool before returning. Returns `[{Dest, Method}]` for each local delivery made.
 
 | `async`
-| Spawns a process to handle delivery; returns `[]` immediately.
-
-| `hybrid`
-| Delivers synchronously to cached routes (the common case), then spawns a process to handle any uncached subscribers discovered in `?SUBETS` or remote routes. Returns the set of destinations hit synchronously.
+| Spawns a process for delivery; returns `[]` immediately. The router pool also spawns delivery on the remote side, avoiding head-of-line blocking.
 |===
-
-The default via parse transform is `hybrid`. Explicit call:
-
-[source,erlang]
-----
-erlroute:pub(?MODULE, self(), ?LINE, <<"events">>, Payload, sync,  erlroute:cache_table(?MODULE)).
-erlroute:pub(?MODULE, self(), ?LINE, <<"events">>, Payload, async, erlroute:cache_table(?MODULE)).
-erlroute:pub(?MODULE, self(), ?LINE, <<"events">>, Payload, hybrid,erlroute:cache_table(?MODULE)).
-----
-
-== Parse transform
-
-Add to your module's compile options:
-
-[source,erlang]
-----
--compile({parse_transform, erlroute_transform}).
-----
-
-The transform rewrites `erlroute:pub` calls at compile time to embed the ETS cache table name as a literal atom and fill in `?MODULE`, `self()`, and `?LINE` automatically, eliminating all runtime overhead on the hot path:
-
-[source,erlang]
-----
-%% With parse transform — all args resolved at compile time
-erlroute:pub(<<"sensor.temperature">>, Reading).
-erlroute:pub(<<"sensor.temperature">>, Reading, sync).
-----
-
-Without parse transform, use the full form or the `?PUB` macros from `erlroute.hrl`.
 
 == Distributed Erlang
 
-Erlroute works transparently in a distributed cluster:
+Erlroute works transparently across a distributed cluster:
 
-* When a node subscribes to a topic, the subscription is propagated to all connected nodes via a one-time sync followed by incremental updates on change.
-* On publish, cross-node routes are dispatched via the router pool on the receiving node (`erlroute_router`), which fans out to local subscribers only.
-* On node disconnect, all routes to that node are removed. On reconnect, a full sync restores them automatically.
+* When a node's subscriber set for a topic changes, the delivery descriptor (`direct` for a single process subscriber, `pool` otherwise) is propagated to all connected nodes as an incremental update.
+* On publish, cross-node routes are dispatched via a sticky router pool on the receiving node. Each topic is assigned to one router at first publish and the assignment is stable until the router dies.
+* `pub/2,3` dispatch to all nodes; `pub_local/2` is local-only and is the function called by the remote router after receiving a cross-node message.
+* On node disconnect, all routes to that node are removed. On reconnect, a full sync restores them.
 
-== ETS caching and performance
+=== Router pool
 
-On the first publish to a `{Module, Topic}` pair, erlroute walks `?SUBETS` and any remote routes to build the delivery list, then writes `#cached_route` entries into a per-module ETS table. Subsequent publishes to the same topic hit this cache directly — no gen_server call, no ETS bag scan.
+Each node runs a fixed pool of router processes (`erlroute_router`). Topics are assigned to routers round-robin on first publish and the assignment is stored in ETS. For `async` publishes the router spawns delivery to avoid head-of-line blocking from slow `call` subscribers on one topic stalling other topics sharing the same router.
 
-Cache entries are invalidated automatically when:
-* a subscriber unsubscribes;
-* a subscribed process dies;
-* a remote route changes (node reconnects with a different router assignment).
+Pool size defaults to 10 and is configurable:
+
+[source,erlang]
+----
+{erlroute, [{router_pool_size, 20}]}
+----
+
+== Performance notes
+
+* The publish hot path is one `ets:lookup` on `?SUBETS` (keyed by topic) plus one `ets:lookup` on `?REMOTETS` when cross-node routes exist. No gen_server call on the publish path.
+* Subscriptions are stored as `{topic(), [sub_spec()]}` in a set table. A separate bag table (`?PIDETS`) maps each subscribed pid to its topics, making process-exit cleanup O(topics-subscribed-by-that-pid) rather than O(total-topics).
+* `call` delivery (blocking gen_server:call) blocks the publishing process for the duration on the local path. Avoid for high-throughput topics or use `async` pub type.
 
 == When not to use erlroute
 
 * You need to exchange messages with non-Erlang services — use an AMQP broker or similar.
 * You need durable queues, persistence, or at-least-once delivery — erlroute is in-memory only.
-* You need content-based routing on message fields — erlroute routes on topic + module only.
+* You need content-based routing on message fields — erlroute routes on topic only.
