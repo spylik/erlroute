@@ -395,6 +395,7 @@ cross_node_test_() ->
             {"remote_pub via plain send",     {timeout, 60, fun do_cross_node_remote_pub/0}},
             {"multi-node, no duplicate send", {timeout, 60, fun do_cross_node_multi_node_no_dup/0}},
             {"bulk unsub(all) propagates removals", {timeout, 60, fun do_cross_node_bulk_unsub/0}},
+            {"bulk unsub(all, Name) propagates removals", {timeout, 60, fun do_cross_node_bulk_unsub_named/0}},
             {"symmetric node discovery",      {timeout, 30, fun do_cross_node_symmetric_discovery/0}},
             {"discovery/propagation settles", {timeout, 60, fun do_cross_node_discovery_settles/0}}
         ]}
@@ -724,6 +725,55 @@ wait_peer_route_count(PeerNode, Topic, FromNode, Expected, Timeout) ->
         _        -> timer:sleep(100),
                     wait_peer_route_count(PeerNode, Topic, FromNode, Expected, Timeout - 100)
     end.
+
+do_cross_node_bulk_unsub_named() ->
+    {ok, _} = application:ensure_all_started(erlroute),
+    {ok, Peer, PeerNode} = start_erlroute_peer("erlroute_bulk_named"),
+    LocalNode = node(),
+    Cleanup = fun() -> catch peer:stop(Peer), application:stop(erlroute) end,
+
+    try
+        ok = wait_for_peer_in_erlroute_nodes(PeerNode, 8000),
+
+        Name      = list_to_atom("erlroute_bulk_named_" ++
+                                 integer_to_list(erlang:unique_integer([positive]))),
+        OtherName = list_to_atom("erlroute_bulk_other_" ++
+                                 integer_to_list(erlang:unique_integer([positive]))),
+        TSolo     = <<"erlroute.bulk.named.solo">>,
+        TShared   = <<"erlroute.bulk.named.shared">>,
+
+        %% A different local (named) subscriber on the shared topic, so that
+        %% topic survives unsub(all, Name).
+        erlroute:sub(TShared, {process, OtherName, info}),
+
+        %% Subscribe the registered name to a solo topic and the shared topic.
+        erlroute:sub(TSolo,   {process, Name, info}),
+        erlroute:sub(TShared, {process, Name, info}),
+        _ = sys:get_state(erlroute),
+
+        ok = wait_peer_route_count(PeerNode, TSolo,   LocalNode, 1, 8000),
+        ok = wait_peer_route_count(PeerNode, TShared, LocalNode, 1, 8000),
+
+        %% Bulk unsubscribe the registered name from everything.
+        ?assertEqual(ok, erlroute:unsub(all, Name)),
+        _ = sys:get_state(erlroute),
+
+        %% Solo topic: Name was the only subscriber -> peer drops the route.
+        ok = wait_peer_route_count(PeerNode, TSolo,   LocalNode, 0, 8000),
+        %% Shared topic: OtherName still subscribed locally -> peer keeps one route.
+        ok = wait_peer_route_count(PeerNode, TShared, LocalNode, 1, 8000),
+
+        %% Locally, no subscription for Name remains; OtherName still there.
+        ?assertEqual([], ets:lookup('$erlroute_subscribers', TSolo)),
+        [{TShared, Subs}] = ets:lookup('$erlroute_subscribers', TShared),
+        ?assertEqual([{process, OtherName, info}], Subs)
+    catch
+        Class:Reason:ST ->
+            Cleanup(),
+            erlang:raise(Class, Reason, ST)
+    end,
+    Cleanup(),
+    ok.
 
 do_cross_node_multi_node_no_dup() ->
     _ = application:stop(erlroute),
