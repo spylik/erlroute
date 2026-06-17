@@ -394,6 +394,7 @@ cross_node_test_() ->
         {inorder, [
             {"remote_pub via plain send",     {timeout, 60, fun do_cross_node_remote_pub/0}},
             {"multi-node, no duplicate send", {timeout, 60, fun do_cross_node_multi_node_no_dup/0}},
+            {"bulk unsub(all) propagates removals", {timeout, 60, fun do_cross_node_bulk_unsub/0}},
             {"symmetric node discovery",      {timeout, 30, fun do_cross_node_symmetric_discovery/0}},
             {"discovery/propagation settles", {timeout, 60, fun do_cross_node_discovery_settles/0}}
         ]}
@@ -654,6 +655,74 @@ assert_peer_got_once(Tag, Payload) ->
             ?assertEqual(no_extra, Extra)
     after 5000 ->
         ?assertEqual({peer_got, Tag, Payload}, timeout)
+    end.
+
+do_cross_node_bulk_unsub() ->
+    {ok, _} = application:ensure_all_started(erlroute),
+    {ok, Peer, PeerNode} = start_erlroute_peer("erlroute_bulk"),
+    LocalNode = node(),
+    Cleanup = fun() -> catch peer:stop(Peer), application:stop(erlroute) end,
+
+    try
+        ok = wait_for_peer_in_erlroute_nodes(PeerNode, 8000),
+
+        Self    = self(),
+        TSolo1  = <<"erlroute.bulk.solo1">>,
+        TSolo2  = <<"erlroute.bulk.solo2">>,
+        TShared = <<"erlroute.bulk.shared">>,
+
+        %% A second LOCAL subscriber on the shared topic, so that topic must
+        %% survive our unsub(all) (its route is updated, not removed).
+        Other = spawn(fun() ->
+            erlroute:sub(TShared, {process, self(), info}),
+            Self ! other_subbed,
+            receive stop -> ok after 30000 -> ok end
+        end),
+        receive other_subbed -> ok after 3000 -> erlang:error(other_subbed_timeout) end,
+
+        %% Subscribe the test process locally to three topics.
+        erlroute:sub(TSolo1),
+        erlroute:sub(TSolo2),
+        erlroute:sub(TShared),
+        _ = sys:get_state(erlroute),
+
+        %% The peer must have learned a route back to us for each topic.
+        ok = wait_peer_route_count(PeerNode, TSolo1,  LocalNode, 1, 8000),
+        ok = wait_peer_route_count(PeerNode, TSolo2,  LocalNode, 1, 8000),
+        ok = wait_peer_route_count(PeerNode, TShared, LocalNode, 1, 8000),
+
+        %% Bulk unsubscribe the calling process from everything.
+        ?assertEqual(ok, erlroute:unsub(all)),
+        _ = sys:get_state(erlroute),
+
+        %% Solo topics: we were the only subscriber, so the peer drops the route.
+        ok = wait_peer_route_count(PeerNode, TSolo1,  LocalNode, 0, 8000),
+        ok = wait_peer_route_count(PeerNode, TSolo2,  LocalNode, 0, 8000),
+        %% Shared topic: Other is still subscribed locally, so the peer keeps
+        %% exactly one (now direct) route — unsub(all) must not over-remove.
+        ok = wait_peer_route_count(PeerNode, TShared, LocalNode, 1, 8000),
+
+        %% Locally, nothing of ours remains.
+        ?assertEqual([], ets:lookup('$erlroute_pid_index', Self)),
+        ?assertEqual([], ets:lookup('$erlroute_subscribers', TSolo1)),
+
+        Other ! stop
+    catch
+        Class:Reason:ST ->
+            Cleanup(),
+            erlang:raise(Class, Reason, ST)
+    end,
+    Cleanup(),
+    ok.
+
+wait_peer_route_count(_PeerNode, _Topic, _FromNode, _Expected, Timeout) when Timeout =< 0 ->
+    erlang:error(peer_route_count_timeout);
+wait_peer_route_count(PeerNode, Topic, FromNode, Expected, Timeout) ->
+    MS = [{#remote_sub{topic = Topic, node = FromNode, _ = '_'}, [], [true]}],
+    case rpc:call(PeerNode, ets, select_count, [?REMOTETS, MS]) of
+        Expected -> ok;
+        _        -> timer:sleep(100),
+                    wait_peer_route_count(PeerNode, Topic, FromNode, Expected, Timeout - 100)
     end.
 
 do_cross_node_multi_node_no_dup() ->
