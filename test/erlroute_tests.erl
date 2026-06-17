@@ -291,6 +291,69 @@ monitor_test_() ->
         ]}
     }.
 
+bulk_unsubscribe_test_() ->
+    {setup,
+        fun setup_start/0,
+        fun cleanup/1,
+        {inorder, [
+            {<<"unsub(all) removes the calling process from every topic">>,
+                fun() ->
+                    Self = self(),
+                    T1 = <<"bulk.all.t1.", (rand_bin())/binary>>,
+                    T2 = <<"bulk.all.t2.", (rand_bin())/binary>>,
+                    T3 = <<"bulk.all.t3.", (rand_bin())/binary>>,
+                    erlroute:sub(T1),
+                    erlroute:sub(T2),
+                    erlroute:sub(T3),
+                    ?assertMatch([{T1, _}], ets:lookup('$erlroute_subscribers', T1)),
+                    ?assertEqual(ok, erlroute:unsub(all)),
+                    ?assertEqual([], ets:lookup('$erlroute_subscribers', T1)),
+                    ?assertEqual([], ets:lookup('$erlroute_subscribers', T2)),
+                    ?assertEqual([], ets:lookup('$erlroute_subscribers', T3)),
+                    ?assertEqual([], ets:lookup('$erlroute_pid_index', Self))
+                end},
+            {<<"unsub(all) releases the monitor for the calling pid">>,
+                fun() ->
+                    Parent = self(),
+                    Pid = spawn(fun() ->
+                        erlroute:sub(<<"bulk.mon.t1.", (rand_bin())/binary>>),
+                        erlroute:sub(<<"bulk.mon.t2.", (rand_bin())/binary>>),
+                        Parent ! subscribed,
+                        receive do_unsub -> ok end,
+                        erlroute:unsub(all),
+                        Parent ! unsubbed,
+                        receive stop -> ok after 5000 -> ok end
+                    end),
+                    receive subscribed -> ok after 1000 -> erlang:error(subscribed_timeout) end,
+                    #erlroute_state{monitors = M1} = sys:get_state(erlroute),
+                    ?assert(maps:is_key(Pid, M1)),
+                    Pid ! do_unsub,
+                    receive unsubbed -> ok after 1000 -> erlang:error(unsubbed_timeout) end,
+                    #erlroute_state{monitors = M2} = sys:get_state(erlroute),
+                    ?assertNot(maps:is_key(Pid, M2)),
+                    ?assertEqual([], ets:lookup('$erlroute_pid_index', Pid)),
+                    Pid ! stop
+                end},
+            {<<"unsub(all, Name) removes a registered-name subscriber from every topic only">>,
+                fun() ->
+                    Self = self(),
+                    Name = list_to_atom("bulk_named_" ++ binary_to_list(rand_bin())),
+                    TA = <<"bulk.named.a.", (rand_bin())/binary>>,
+                    TB = <<"bulk.named.b.", (rand_bin())/binary>>,
+                    TS = <<"bulk.named.self.", (rand_bin())/binary>>,
+                    erlroute:sub(TA, {process, Name, info}),
+                    erlroute:sub(TB, {process, Name, info}),
+                    erlroute:sub(TS),
+                    ?assertEqual(ok, erlroute:unsub(all, Name)),
+                    ?assertEqual([], ets:lookup('$erlroute_subscribers', TA)),
+                    ?assertEqual([], ets:lookup('$erlroute_subscribers', TB)),
+                    [{TS, Subs}] = ets:lookup('$erlroute_subscribers', TS),
+                    ?assert(lists:member({process, Self, info}, Subs)),
+                    erlroute:unsub(all)
+                end}
+        ]}
+    }.
+
 router_pool_test_() ->
     {setup,
         fun setup_start/0,
