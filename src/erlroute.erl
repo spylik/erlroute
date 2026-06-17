@@ -109,6 +109,11 @@ handle_call({unsubscribe, Topic, FlowDest}, _From,
     _ = propagate_local_change(Topic, Before, ErlRouteNodes),
     {reply, ok, State#erlroute_state{monitors = may_release_monitor(FlowDest, Monitors)}};
 
+handle_call({unsubscribe_all, Dest}, _From,
+            #erlroute_state{erlroute_nodes = ErlRouteNodes, monitors = Monitors} = State) ->
+    unsubscribe_all(Dest, ErlRouteNodes),
+    {reply, ok, State#erlroute_state{monitors = may_release_monitor({process, Dest, info}, Monitors)}};
+
 handle_call(Msg, _From, State) ->
     error_logger:warning_msg("we are in undefined handle_call with message ~p\n", [Msg]),
     {reply, ok, State}.
@@ -454,7 +459,15 @@ maybe_index_pid(_, _, _) -> ok.
 % ---------------------------------- unsub part --------------------------------
 
 -spec unsub(Target) -> ok when
-    Target :: topic().
+    Target :: 'all' | topic().
+
+% @doc bulk unsubscribe: remove the calling process (by pid and registered name) from every topic
+unsub(all) ->
+    unsub(all, self()),
+    case erlang:process_info(self(), registered_name) of
+        {registered_name, Name} -> unsub(all, Name);
+        []                      -> ok
+    end;
 
 unsub(Topic) when is_binary(Topic) ->
     unsub(Topic, {process, self(), info}),
@@ -464,8 +477,12 @@ unsub(Topic) when is_binary(Topic) ->
     end.
 
 -spec unsub(Topic, FlowDest) -> ok when
-    Topic    :: topic(),
+    Topic    :: 'all' | topic(),
     FlowDest :: flow_dest() | pid() | atom() | fun() | {node(), fun()} | static_function() | {node(), static_function()}.
+
+% @doc bulk unsubscribe: remove a process destination (pid or registered name) from every topic
+unsub(all, Dest) when is_pid(Dest) orelse is_atom(Dest) ->
+    gen_server:call(?MODULE, {unsubscribe_all, Dest});
 
 unsub(Topic, {DestType, Dest, Method}) when
         is_binary(Topic),
@@ -545,6 +562,39 @@ unsubscribe_local_pid(Pid, ErlRouteNodes) ->
     lists:foreach(fun({T, Before}) ->
         propagate_local_change(T, Before, ErlRouteNodes)
     end, Befores).
+
+% Bulk unsubscribe a destination from every topic it appears on. A pid uses the
+% ?PIDETS reverse index; a registered name is not indexed, so it falls back to a
+% scan of ?SUBETS (only on explicit unsub(all, Name), never on the hot path).
+-spec unsubscribe_all(Dest, ErlRouteNodes) -> ok when
+    Dest          :: pid() | atom(),
+    ErlRouteNodes :: [node()].
+
+unsubscribe_all(Pid, ErlRouteNodes) when is_pid(Pid) ->
+    unsubscribe_local_pid(Pid, ErlRouteNodes);
+unsubscribe_all(Name, ErlRouteNodes) when is_atom(Name) ->
+    IsNameSub = fun({process, D, _}) -> D =:= Name; (_) -> false end,
+    Affected = [T || {T, Subs} <- ets:tab2list(?SUBETS), lists:any(IsNameSub, Subs)],
+    Befores = [{T, delivery_descriptor(T)} || T <- Affected],
+    lists:foreach(fun(T) -> delete_subs(T, IsNameSub) end, Affected),
+    lists:foreach(fun({T, Before}) ->
+        propagate_local_change(T, Before, ErlRouteNodes)
+    end, Befores).
+
+-spec delete_subs(Topic, Pred) -> ok when
+    Topic :: topic(),
+    Pred  :: fun((sub_spec()) -> boolean()).
+
+delete_subs(Topic, Pred) ->
+    case ets:lookup(?SUBETS, Topic) of
+        [{Topic, Subs}] ->
+            case [S || S <- Subs, not Pred(S)] of
+                []      -> ets:delete(?SUBETS, Topic);
+                NewSubs -> _ = ets:insert(?SUBETS, {Topic, NewSubs})
+            end,
+            ok;
+        [] -> ok
+    end.
 
 -spec remove_remote_routes(Topic, Node) -> ok when
     Topic :: topic(),

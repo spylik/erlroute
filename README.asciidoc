@@ -76,9 +76,15 @@ erlroute:unsub(<<"events">>).
 erlroute:unsub(<<"events">>, my_worker).
 erlroute:unsub(<<"events">>, {process, my_worker, cast}).
 erlroute:unsub(<<"events">>, fun(P) -> ... end).
+
+%% Bulk unsubscribe — remove a process from *every* topic at once
+erlroute:unsub(all).                %% the calling process (by pid and registered name)
+erlroute:unsub(all, my_worker).     %% a given process: pid or registered name
 ----
 
 `unsub/1` removes both the pid-based and name-based subscriptions for the calling process. Pid subscriptions are also cleaned up automatically when the subscribed process exits.
+
+Passing the atom `all` unsubscribes a process from every topic it is subscribed to. `unsub(all)` targets the calling process; `unsub(all, Dest)` targets a given process destination (a pid or a registered name). Removals propagate to other nodes just like a single-topic `unsub`. Bulk unsubscribe applies to process destinations only — function/MFA subscriptions are not removed this way.
 
 == Publish
 
