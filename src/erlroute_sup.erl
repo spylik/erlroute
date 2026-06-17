@@ -21,20 +21,32 @@ start_link() ->
     Result :: {ok, {SupFlags :: supervisor:sup_flags(), [ChildSpec :: supervisor:child_spec()]}}.
 
 init([]) ->
-    RestartStrategy = {                        % Rules for restarting supervisor
+    %% An erlroute crash is FATAL to the node, by design. erlroute owns all
+    %% routing state in its own process-linked ETS tables (no heir, no
+    %% persistence) and links the whole router pool, so an in-place restart
+    %% cannot recover — it would come back empty (local subscribers don't
+    %% re-subscribe) and leave peers holding stale {Node, RouterPid} routes to
+    %% the dead process (which never self-heal, since the node stays up and
+    %% emits no nodedown). intensity 0 makes a single abnormal exit escalate:
+    %% sup -> application -> (permanent app in a release) -> node halt. The
+    %% node is then restarted by the platform, and recovery is clean — local
+    %% subscribers re-subscribe on their own init, peers see nodedown/nodeup
+    %% and re-discover. `transient` keeps a normal erlroute:stop/1 clean (no
+    %% restart-escalation on graceful shutdown).
+    RestartStrategy = {
         one_for_one,                           % Supervisor restart strategy
-        10,                                    % Max restarts
-        10                                     % Timeout (need read and test more about timeout strategy)
-    }, 
+        0,                                     % Max restarts: 0 -> any crash escalates (fatal)
+        1                                      % Period
+    },
 
     Erlroute = {
         erlroute,                              % ID
         {erlroute, start_link, []},            % Start
-        permanent,                             % Children restart strategy (temporary - if they die, they should not be restarted)
+        transient,                             % restart only on abnormal exit; intensity 0 then escalates -> node down
         5000,                                  % Shutdown strategy
         worker,                                % Child can be supervisor or worker
         [erlroute]                             % Option lists the modules that this process depends on
     },
 
-    Childrens = [Erlroute],                    % Mapping paraments defined in Server to childrens. We can specify many childrens
+    Childrens = [Erlroute],
     {ok, {RestartStrategy, Childrens}}.
